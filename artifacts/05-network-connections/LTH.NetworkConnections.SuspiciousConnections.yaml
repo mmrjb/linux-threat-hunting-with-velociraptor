@@ -1,0 +1,49 @@
+name: LTH.NetworkConnections.SuspiciousConnections
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.5 Network Connections
+
+  This artifact identifies suspicious Linux network connections by correlating
+  listening and established connections with process information.
+
+  It highlights unusual ports, scripting engines with network activity,
+  network tools, shells, and processes running from writable or temporary paths.
+
+type: CLIENT
+
+sources:
+  - name: SuspiciousConnections
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Status,
+             Laddr,
+             Lport,
+             Raddr,
+             Rport,
+             Pid,
+             ProcInfo.Name AS ProcessName,
+             ProcInfo.Exe AS ProcessPath,
+             ProcInfo.Username AS Username,
+             ProcInfo.CommandLine AS CommandLine,
+             CallChain,
+             if(condition=ProcInfo.Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                then="HIGH",
+                else=if(condition=Lport =~ "^(4444|1337|31337|8080|9001|9002)$" OR Rport =~ "^(4444|1337|31337|8080|9001|9002)$",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=ProcInfo.Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                then="Network activity from writable or temporary path",
+                else=if(condition=Lport =~ "^(4444|1337|31337|8080|9001|9002)$" OR Rport =~ "^(4444|1337|31337|8080|9001|9002)$",
+                        then="Suspicious listening or remote port",
+                        else="Suspicious network tool or shell process")) AS Reason
+      FROM Artifact.LTH.NetworkConnections.NetstatEnriched()
+      WHERE Status =~ "ESTAB|LISTEN"
+        AND (
+             ProcInfo.Exe =~ "^/(tmp|var/tmp|dev/shm|home)/"
+             OR Lport =~ "^(4444|1337|31337|8080|9001|9002)$"
+             OR Rport =~ "^(4444|1337|31337|8080|9001|9002)$"
+             OR ProcInfo.CommandLine =~ "(?i)(bash|sh|python|python3|perl|ruby|nc|ncat|netcat|socat|curl|wget|chisel|ngrok|frp|ssh -R|ssh -L)"
+        )

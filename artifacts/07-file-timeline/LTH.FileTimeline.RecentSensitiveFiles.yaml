@@ -1,0 +1,110 @@
+name: LTH.FileTimeline.RecentSensitiveFiles
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.7 File System and Timeline Analysis
+
+  This artifact collects recently modified files from sensitive Linux paths
+  and creates a basic filesystem timeline from MTime and CTime.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: RecentDays
+    type: int
+    default: 30
+    description: Return files modified or changed within this number of days.
+
+  - name: SensitivePathGlobs
+    default: /etc/**10,/usr/local/bin/**10,/opt/**10,/var/www/**10,/srv/www/**10,/tmp/**10,/var/tmp/**10,/dev/shm/**10,/home/*/**10
+    description: Comma-separated sensitive path globs.
+
+sources:
+  - name: RecentSensitiveFiles
+    description: Recently modified files in sensitive paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Cutoff <= timestamp(epoch=now() - (RecentDays * 86400))
+
+      SELECT OSPath,
+             Size,
+             Mode.String AS Mode,
+             Mtime AS MTime,
+             Ctime AS CTime,
+             Atime AS ATime,
+             IsDir,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="HIGH",
+                else=if(condition=OSPath =~ "^/(etc|usr/local/bin|opt|var/www|srv/www)/",
+                        then="MEDIUM",
+                        else="INFO")) AS Severity,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="Recent file in writable or temporary path",
+                else=if(condition=OSPath =~ "^/etc/",
+                        then="Recent change under /etc",
+                        else=if(condition=OSPath =~ "^/(var/www|srv/www)/",
+                                then="Recent change under web root",
+                                else="Recent sensitive file change"))) AS Reason
+      FROM glob(
+        globs=split(string=SensitivePathGlobs, sep_string=","),
+        recursion_callback="x=>NOT x.OSPath =~ '^/(proc|sys|run|snap)'",
+        nosymlink=TRUE
+      )
+      WHERE NOT IsDir
+        AND Mtime > Cutoff
+
+  - name: SensitiveTimelineEvents
+    description: Basic filesystem timeline events from recent sensitive files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Cutoff <= timestamp(epoch=now() - (RecentDays * 86400))
+
+      LET Files <=
+        SELECT OSPath,
+               Size,
+               Mode.String AS Mode,
+               Mtime AS MTime,
+               Ctime AS CTime,
+               Atime AS ATime,
+               IsDir
+        FROM glob(
+          globs=split(string=SensitivePathGlobs, sep_string=","),
+          recursion_callback="x=>NOT x.OSPath =~ '^/(proc|sys|run|snap)'",
+          nosymlink=TRUE
+        )
+        WHERE NOT IsDir
+          AND Mtime > Cutoff
+
+      LET MEvents <=
+        SELECT OSPath,
+               Size,
+               Mode,
+               "MTime" AS EventType,
+               MTime AS EventTime,
+               "File modified" AS Reason
+        FROM Files
+        WHERE MTime
+
+      LET CEvents <=
+        SELECT OSPath,
+               Size,
+               Mode,
+               "CTime" AS EventType,
+               CTime AS EventTime,
+               "Metadata changed" AS Reason
+        FROM Files
+        WHERE CTime
+
+      SELECT *
+      FROM chain(
+        a=MEvents,
+        b=CEvents
+      )

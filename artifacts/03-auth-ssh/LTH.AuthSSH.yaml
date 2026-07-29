@@ -1,0 +1,93 @@
+name: LTH.AuthSSH
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.3 Authentication and SSH Activity
+
+  This wrapper artifact collects authentication and SSH-related evidence
+  from Linux endpoints, including login history, SSH login attempts,
+  authorized keys, private keys, known hosts, SSH host public keys,
+  SSH configuration, and auth logs.
+
+type: CLIENT
+
+sources:
+  - name: LastUserLogin
+    description: Last interactive login sessions from WTMP files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.LastUserLogin()
+
+  - name: SSHLogin
+    description: SSH login attempts parsed from auth logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.SSHLogin()
+
+  - name: AuthorizedKeys
+    description: SSH authorized_keys files and parsed public keys.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.AuthorizedKeys()
+
+  - name: PrivateKeys
+    description: SSH private keys and encryption status.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.PrivateKeys()
+
+  - name: KnownHosts
+    description: SSH known_hosts entries for historical SSH relationships.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.KnownHosts(source="KnownHosts")
+
+  - name: HostPublicKeys
+    description: Local SSH host public keys collected from /etc/ssh.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.KnownHosts(source="HostPublicKeys")
+
+
+  - name: SSHConfigReview
+    description: SSH server and client configuration review.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.SSHConfigReview()
+
+  - name: AuthLogReview
+    description: Authentication log review for SSH, sudo, su, failed logins, and session events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.AuthSSH.AuthLogReview()

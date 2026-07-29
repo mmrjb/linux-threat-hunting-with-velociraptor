@@ -1,0 +1,54 @@
+name: LTH.AuthSSH.AuthLogReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.3 Authentication and SSH Activity
+
+  This artifact reviews Linux authentication logs for SSH, sudo, su,
+  failed login attempts, invalid users, root access, and session events.
+
+type: CLIENT
+
+parameters:
+  - name: AuthLogGlob
+    default: /var/log/auth.log,/var/log/auth.log.1,/var/log/secure,/var/log/secure.1
+    description: Comma-separated authentication log files to review. Compressed files are excluded.
+
+sources:
+  - name: AuthLogEvents
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET AuthLogs <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=AuthLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=AuthLogs,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)Failed password",
+                    then="Failed SSH Login",
+                    else=if(condition=Line =~ "(?i)Invalid user",
+                            then="Invalid SSH User",
+                            else=if(condition=Line =~ "(?i)Accepted password|Accepted publickey",
+                                    then="Successful SSH Login",
+                                    else=if(condition=Line =~ "(?i)authentication failure",
+                                            then="Authentication Failure",
+                                            else=if(condition=Line =~ "(?i)session opened|session closed",
+                                                    then="Session Event",
+                                                    else="Authentication Event"))))) AS EventCategory,
+                 if(condition=Line =~ "(?i)(Failed password|Invalid user|authentication failure)",
+                    then="MEDIUM",
+                    else=if(condition=Line =~ "(?i)(Accepted password|Accepted publickey).*root",
+                            then="HIGH",
+                            else="INFO")) AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(sshd|Failed password|Accepted password|Accepted publickey|Invalid user|authentication failure|session opened|session closed|sudo|su:)"
+        }
+      )

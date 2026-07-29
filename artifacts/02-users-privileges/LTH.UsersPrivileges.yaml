@@ -1,0 +1,61 @@
+name: LTH.UsersPrivileges
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.2 Users, Groups, and Privileges
+
+  This wrapper artifact collects Linux users, groups, privileged users,
+  interactive users, and sudoers rules for threat hunting, notebook analysis,
+  and reporting.
+
+type: CLIENT
+
+sources:
+  - name: Users
+    description: Local Linux users from /etc/passwd.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.UsersPrivileges.Users()
+
+  - name: Groups
+    description: Local Linux groups and memberships from /etc/group.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.UsersPrivileges.Groups()
+
+  - name: RootUsers
+    description: Users with root or sudo-like group membership.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.UsersPrivileges.RootUsers()
+
+  - name: InteractiveUsers
+    description: Users with interactive login shells.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.UsersPrivileges.InteractiveUsers()
+
+  - name: SudoersRules
+    description: Active sudoers rules from /etc/sudoers and /etc/sudoers.d.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.UsersPrivileges.SudoersReview()

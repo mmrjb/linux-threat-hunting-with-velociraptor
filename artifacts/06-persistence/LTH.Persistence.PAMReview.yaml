@@ -1,0 +1,70 @@
+name: LTH.Persistence.PAMReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This artifact reviews PAM configuration files and highlights suspicious
+  PAM modules or paths that may indicate authentication persistence.
+
+type: CLIENT
+
+parameters:
+  - name: PAMGlob
+    default: /etc/pam.d/*
+    description: PAM configuration files.
+
+sources:
+  - name: PAMLines
+    description: PAM configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET PAMFiles <=
+        SELECT OSPath AS PAMFile
+        FROM glob(globs=split(string=PAMGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=PAMFiles,
+        query={
+          SELECT PAMFile AS Path,
+                 Line
+          FROM parse_lines(filename=PAMFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )
+
+  - name: SuspiciousPAMLines
+    description: Suspicious PAM configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET PAMFiles <=
+        SELECT OSPath AS PAMFile
+        FROM glob(globs=split(string=PAMGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=PAMFiles,
+        query={
+          SELECT PAMFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity,
+                 if(condition=Line =~ "(?i)(pam_exec|pam_python|pam_permit|pam_script)",
+                    then="Risky PAM module usage",
+                    else=if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                            then="PAM references writable or unusual path",
+                            else="Suspicious PAM configuration")) AS Reason
+          FROM parse_lines(filename=PAMFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(pam_exec|pam_python|pam_permit|pam_script|/tmp/|/var/tmp/|/dev/shm/|/home/)"
+        }
+      )

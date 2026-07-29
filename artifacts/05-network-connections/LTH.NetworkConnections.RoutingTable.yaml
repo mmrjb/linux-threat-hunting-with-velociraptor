@@ -1,0 +1,25 @@
+name: LTH.NetworkConnections.RoutingTable
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.5 Network Connections
+
+  This artifact collects Linux routing table information using safe shell checks.
+  It helps analysts review default gateways, static routes, and unusual network paths.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: RoutingTable
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT "ip route show" AS Command,
+             Stdout,
+             Stderr,
+             ReturnCode
+      FROM execve(argv=["/bin/sh", "-c", "command -v ip >/dev/null 2>&1 && ip route show 2>/dev/null || route -n 2>/dev/null || true"])

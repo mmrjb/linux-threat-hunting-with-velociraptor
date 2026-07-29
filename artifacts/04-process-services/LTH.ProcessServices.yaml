@@ -1,0 +1,71 @@
+name: LTH.ProcessServices
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.4 Processes and Services
+
+  This wrapper artifact collects Linux process and service evidence,
+  including running processes, active services, suspicious processes,
+  suspicious services, and systemd service unit configuration review.
+
+type: CLIENT
+
+sources:
+  - name: Processes
+    description: Running processes on the Linux endpoint.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.Pslist()
+
+  - name: Services
+    description: Linux services and their current state.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.Services()
+
+  - name: SuspiciousProcesses
+    description: Processes with suspicious execution path, command line, or deleted executable.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.SuspiciousProcesses()
+
+  - name: SuspiciousServices
+    description: Active services with suspicious names or descriptions.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.SuspiciousServices()
+
+  - name: ServiceUnitConfig
+    description: Important systemd service unit configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.ServiceUnitReview(source="ServiceUnitConfig")
+
+  - name: SuspiciousServiceUnitLines
+    description: Suspicious lines found in systemd service unit files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ProcessServices.ServiceUnitReview(source="SuspiciousServiceUnitLines")

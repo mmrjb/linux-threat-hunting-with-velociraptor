@@ -1,0 +1,76 @@
+name: LTH.Persistence.SystemdUnitReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This artifact reviews systemd service unit files and highlights suspicious
+  service configuration lines that may indicate persistence, backdoors,
+  downloaders, reverse shells, or attacker-controlled startup execution.
+
+type: CLIENT
+
+parameters:
+  - name: UnitFileGlob
+    default: /etc/systemd/system/**/*.service,/lib/systemd/system/**/*.service,/usr/lib/systemd/system/**/*.service
+    description: Comma-separated systemd service unit file globs.
+
+sources:
+  - name: SystemdServiceUnitLines
+    description: Important systemd service unit lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET UnitFiles <=
+        SELECT OSPath AS UnitFile
+        FROM glob(globs=split(string=UnitFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=UnitFiles,
+        query={
+          SELECT UnitFile AS Path,
+                 Line
+          FROM parse_lines(filename=UnitFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)^\\s*(Description|ExecStart|ExecStartPre|ExecStartPost|User|Group|WorkingDirectory|Environment|Restart|WantedBy)="
+        }
+      )
+
+  - name: SuspiciousSystemdUnitLines
+    description: Suspicious systemd service unit lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET UnitFiles <=
+        SELECT OSPath AS UnitFile
+        FROM glob(globs=split(string=UnitFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=UnitFiles,
+        query={
+          SELECT UnitFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="HIGH",
+                    else=if(condition=Line =~ "(?i)(curl|wget|nc |ncat|netcat|socat|bash -c|bash -i|python -c|python3 -c|perl -e|base64 -d|xmrig|miner|chisel|ngrok|frp)",
+                            then="HIGH",
+                            else="MEDIUM")) AS Severity,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="Service executes from writable or temporary path",
+                    else=if(condition=Line =~ "(?i)(curl|wget|nc |ncat|netcat|socat|bash -c|bash -i|python -c|python3 -c|perl -e|base64 -d)",
+                            then="Suspicious command in systemd service",
+                            else=if(condition=Line =~ "(?i)(LD_PRELOAD|LD_LIBRARY_PATH)",
+                                    then="Suspicious environment variable in service",
+                                    else="Suspicious systemd unit line"))) AS Reason
+          FROM parse_lines(filename=UnitFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(ExecStart|ExecStartPre|ExecStartPost|Environment|WorkingDirectory|/tmp/|/var/tmp/|/dev/shm/|/home/|curl|wget|nc |ncat|netcat|socat|bash -c|bash -i|python -c|python3 -c|perl -e|base64 -d|LD_PRELOAD|LD_LIBRARY_PATH|xmrig|miner|chisel|ngrok|frp)"
+        }
+      )

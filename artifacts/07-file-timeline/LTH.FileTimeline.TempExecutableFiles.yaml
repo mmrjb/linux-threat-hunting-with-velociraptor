@@ -1,0 +1,45 @@
+name: LTH.FileTimeline.TempExecutableFiles
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.7 File System and Timeline Analysis
+
+  This artifact identifies executable or script-like files in writable and
+  temporary Linux paths such as /tmp, /var/tmp, /dev/shm, and user home paths.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: TempPathGlobs
+    default: /tmp/**10,/var/tmp/**10,/dev/shm/**10,/home/*/**10
+    description: Comma-separated writable or temporary path globs.
+
+sources:
+  - name: TempExecutableFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT OSPath,
+             Size,
+             Mode.String AS Mode,
+             Mtime AS MTime,
+             Ctime AS CTime,
+             Atime AS ATime,
+             "HIGH" AS Severity,
+             if(condition=Mode.String =~ "x",
+                then="Executable file in writable or temporary path",
+                else="Script-like file in writable or temporary path") AS Reason
+      FROM glob(
+        globs=split(string=TempPathGlobs, sep_string=","),
+        recursion_callback="x=>NOT x.OSPath =~ '^/(proc|sys|run|snap)'",
+        nosymlink=TRUE
+      )
+      WHERE NOT IsDir
+        AND (
+             Mode.String =~ "x"
+             OR OSPath =~ "(?i)(\\.sh$|\\.py$|\\.pl$|\\.rb$|\\.bin$|\\.elf$|\\.run$)"
+        )

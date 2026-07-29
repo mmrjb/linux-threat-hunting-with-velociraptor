@@ -1,0 +1,69 @@
+name: LTH.Persistence.StartupFilesReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This artifact reviews common Linux startup and persistence files such as
+  rc.local, init.d scripts, profile.d scripts, cron directories, and shell
+  startup locations.
+
+type: CLIENT
+
+parameters:
+  - name: StartupFileGlob
+    default: /etc/rc.local,/etc/init.d/*,/etc/profile,/etc/profile.d/*,/etc/cron.*/*,/var/spool/cron/*,/var/spool/cron/crontabs/*
+    description: Comma-separated startup file globs.
+
+sources:
+  - name: StartupFileLines
+    description: Startup file lines from common persistence locations.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET StartupFiles <=
+        SELECT OSPath AS StartupFile
+        FROM glob(globs=split(string=StartupFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=StartupFiles,
+        query={
+          SELECT StartupFile AS Path,
+                 Line
+          FROM parse_lines(filename=StartupFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )
+
+  - name: SuspiciousStartupFileLines
+    description: Suspicious startup file lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET StartupFiles <=
+        SELECT OSPath AS StartupFile
+        FROM glob(globs=split(string=StartupFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=StartupFiles,
+        query={
+          SELECT StartupFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="Startup command references writable or temporary path",
+                    else="Suspicious startup command") AS Reason
+          FROM parse_lines(filename=StartupFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(curl|wget|nc |ncat|netcat|socat|bash -c|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d|chmod \\+x|/tmp/|/var/tmp/|/dev/shm/|xmrig|miner|chisel|ngrok|frp)"
+        }
+      )

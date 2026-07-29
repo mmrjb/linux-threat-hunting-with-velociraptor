@@ -1,0 +1,141 @@
+name: LTH.Persistence
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This wrapper artifact collects Linux persistence evidence including cron jobs,
+  authorized SSH keys, services, systemd units, timers, startup files,
+  shell profiles, and PAM configuration.
+
+type: CLIENT
+
+sources:
+  - name: Crontab
+    description: Cron jobs and scheduled tasks.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.Crontab()
+
+  - name: AuthorizedKeys
+    description: SSH authorized_keys persistence entries.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.AuthorizedKeys()
+
+  - name: Services
+    description: Linux service state.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.Services()
+
+  - name: SystemdServiceUnitLines
+    description: Important systemd service unit lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.SystemdUnitReview(source="SystemdServiceUnitLines")
+
+  - name: SuspiciousSystemdUnitLines
+    description: Suspicious systemd service unit lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.SystemdUnitReview(source="SuspiciousSystemdUnitLines")
+
+  - name: SystemdTimerLines
+    description: Systemd timer configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.SystemdTimerReview(source="SystemdTimerLines")
+
+  - name: SuspiciousSystemdTimerLines
+    description: Suspicious systemd timer lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.SystemdTimerReview(source="SuspiciousSystemdTimerLines")
+
+  - name: StartupFileLines
+    description: Startup file lines from common persistence locations.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.StartupFilesReview(source="StartupFileLines")
+
+  - name: SuspiciousStartupFileLines
+    description: Suspicious startup file lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.StartupFilesReview(source="SuspiciousStartupFileLines")
+
+  - name: ShellProfileLines
+    description: Shell profile startup lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.ShellProfileReview(source="ShellProfileLines")
+
+  - name: SuspiciousShellProfileLines
+    description: Suspicious shell profile persistence lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.ShellProfileReview(source="SuspiciousShellProfileLines")
+
+  - name: PAMLines
+    description: PAM configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.PAMReview(source="PAMLines")
+
+  - name: SuspiciousPAMLines
+    description: Suspicious PAM configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.Persistence.PAMReview(source="SuspiciousPAMLines")

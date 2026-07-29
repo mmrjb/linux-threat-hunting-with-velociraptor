@@ -1,0 +1,54 @@
+name: LTH.FileTimeline.WebRootChanges
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.7 File System and Timeline Analysis
+
+  This artifact collects recently modified files from common Linux web root
+  directories. It helps identify webshells, dropped files, modified scripts,
+  and suspicious web content changes.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: RecentDays
+    type: int
+    default: 30
+    description: Return web files modified within this number of days.
+
+  - name: WebRootGlobs
+    default: /var/www/**10,/srv/www/**10,/usr/share/nginx/html/**10,/var/www/html/**10
+    description: Comma-separated web root globs.
+
+sources:
+  - name: WebRootChanges
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Cutoff <= timestamp(epoch=now() - (RecentDays * 86400))
+
+      SELECT OSPath,
+             Size,
+             Mode.String AS Mode,
+             Mtime AS MTime,
+             Ctime AS CTime,
+             Atime AS ATime,
+             if(condition=OSPath =~ "(?i)(\\.php$|\\.jsp$|\\.aspx$|\\.cgi$|\\.pl$|\\.py$|\\.sh$)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=OSPath =~ "(?i)(\\.php$|\\.jsp$|\\.aspx$|\\.cgi$)",
+                then="Recent server-side web file change",
+                else=if(condition=OSPath =~ "(?i)(\\.sh$|\\.py$|\\.pl$)",
+                        then="Recent script file under web root",
+                        else="Recent web root file change")) AS Reason
+      FROM glob(
+        globs=split(string=WebRootGlobs, sep_string=","),
+        recursion_callback="x=>NOT x.OSPath =~ '^/(proc|sys|run|snap)'",
+        nosymlink=TRUE
+      )
+      WHERE NOT IsDir
+        AND Mtime > Cutoff

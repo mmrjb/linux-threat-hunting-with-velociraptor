@@ -1,0 +1,56 @@
+name: LTH.AuthSSH.SSHConfigReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.3 Authentication and SSH Activity
+
+  This artifact reviews SSH server and client configuration files.
+  It highlights risky SSH settings such as root login, password authentication,
+  empty passwords, agent forwarding, and weak access control.
+
+type: CLIENT
+
+parameters:
+  - name: SSHConfigGlob
+    default: /etc/ssh/sshd_config,/etc/ssh/sshd_config.d/*,/etc/ssh/ssh_config,/etc/ssh/ssh_config.d/*,/root/.ssh/config,/home/*/.ssh/config
+    description: Comma-separated SSH configuration files to review.
+
+sources:
+  - name: SSHConfigLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET ConfigFiles <=
+        SELECT OSPath AS ConfigFile
+        FROM glob(globs=split(string=SSHConfigGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=ConfigFiles,
+        query={
+          SELECT ConfigFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)^\\s*PermitRootLogin\\s+yes",
+                    then="HIGH",
+                    else=if(condition=Line =~ "(?i)^\\s*PermitEmptyPasswords\\s+yes",
+                            then="HIGH",
+                            else=if(condition=Line =~ "(?i)^\\s*PasswordAuthentication\\s+yes",
+                                    then="MEDIUM",
+                                    else=if(condition=Line =~ "(?i)^\\s*AllowAgentForwarding\\s+yes",
+                                            then="MEDIUM",
+                                            else="INFO")))) AS Severity,
+                 if(condition=Line =~ "(?i)^\\s*PermitRootLogin\\s+yes",
+                    then="Root SSH login is allowed",
+                    else=if(condition=Line =~ "(?i)^\\s*PermitEmptyPasswords\\s+yes",
+                            then="Empty password login is allowed",
+                            else=if(condition=Line =~ "(?i)^\\s*PasswordAuthentication\\s+yes",
+                                    then="Password authentication is enabled",
+                                    else=if(condition=Line =~ "(?i)^\\s*AllowAgentForwarding\\s+yes",
+                                            then="SSH agent forwarding is enabled",
+                                            else="SSH configuration line")))) AS Reason
+          FROM parse_lines(filename=ConfigFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )

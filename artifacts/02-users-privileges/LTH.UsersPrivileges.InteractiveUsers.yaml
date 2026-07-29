@@ -1,0 +1,31 @@
+name: LTH.UsersPrivileges.InteractiveUsers
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.2 Users, Groups, and Privileges
+
+  This artifact lists Linux users with interactive shells.
+  It excludes common non-interactive shells such as nologin, false and sync.
+
+type: CLIENT
+
+parameters:
+  - name: NonInteractiveShellRegex
+    default: "nologin|false|sync|shutdown|halt"
+    description: Regex for shells that should be treated as non-interactive.
+
+sources:
+  - name: InteractiveUsers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT User,
+             Description,
+             Uid,
+             Gid,
+             Homedir,
+             Shell
+      FROM Artifact.LTH.UsersPrivileges.Users()
+      WHERE NOT Shell =~ NonInteractiveShellRegex
+      ORDER BY User

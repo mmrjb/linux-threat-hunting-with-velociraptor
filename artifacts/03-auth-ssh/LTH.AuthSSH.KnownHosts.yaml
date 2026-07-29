@@ -1,0 +1,94 @@
+name: LTH.AuthSSH.KnownHosts
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.3 Authentication and SSH Activity
+
+  Finds and parses SSH known_hosts files for local users and collects
+  local SSH host public keys from /etc/ssh.
+
+type: CLIENT
+
+parameters:
+  - name: sshKnownHostsFiles
+    default: '.ssh/known_hosts*'
+    description: Relative known_hosts glob searched under each user's home directory.
+
+precondition: |
+  SELECT OS
+  FROM info()
+  WHERE OS = "linux"
+
+sources:
+  - name: KnownHosts
+    description: Parse user known_hosts files.
+    query: |
+      LET known_hosts_files <=
+        SELECT *
+        FROM foreach(
+          row={
+            SELECT Uid, User, Homedir
+            FROM Artifact.Linux.Sys.Users()
+          },
+          query={
+            SELECT OSPath,
+                   Mtime,
+                   Ctime,
+                   User,
+                   Uid
+            FROM glob(
+              globs=sshKnownHostsFiles,
+              root=Homedir
+            )
+            WHERE NOT IsDir
+          }
+        )
+
+      SELECT *
+      FROM foreach(
+        row=known_hosts_files,
+        query={
+          SELECT User,
+                 Uid,
+                 OSPath,
+                 Mtime,
+                 Ctime,
+                 Hostname,
+                 Type,
+                 PublicKey
+          FROM split_records(
+            filenames=OSPath,
+            regex=" ",
+            record_regex="\n",
+            columns=["Hostname", "Type", "PublicKey"]
+          )
+          WHERE NOT Hostname =~ "^#"
+            AND Hostname
+            AND Type
+        }
+      )
+
+  - name: HostPublicKeys
+    description: Collect local SSH host public keys from /etc/ssh.
+    query: |
+      LET Me <= SELECT * FROM info()
+
+      SELECT *
+      FROM foreach(
+        row={
+          SELECT OSPath
+          FROM glob(globs="/etc/ssh/ssh_host*.pub")
+          WHERE NOT IsDir
+        },
+        query={
+          SELECT Type,
+                 PublicKey,
+                 KeyName,
+                 OSPath,
+                 Me[0].Fqdn AS Fqdn
+          FROM split_records(
+            columns=["Type", "PublicKey", "KeyName"],
+            filenames=OSPath,
+            regex=" +"
+          )
+        }
+      )

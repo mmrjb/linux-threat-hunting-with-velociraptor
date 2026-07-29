@@ -1,0 +1,48 @@
+name: LTH.UsersPrivileges.SudoersReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.2 Users, Groups, and Privileges
+
+  This artifact reviews sudoers configuration files and extracts active
+  sudo rules from /etc/sudoers and /etc/sudoers.d/*.
+
+type: CLIENT
+
+parameters:
+  - name: SudoersGlob
+    default: /etc/sudoers,/etc/sudoers.d/*
+    description: Comma-separated sudoers files to review.
+
+sources:
+  - name: SudoersRules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET SudoersFiles <=
+        SELECT FullPath AS SudoersFile
+        FROM glob(globs=split(string=SudoersGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=SudoersFiles,
+        query={
+          SELECT SudoersFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)NOPASSWD", then="Yes", else="No") AS HasNOPASSWD,
+                 if(condition=Line =~ "\\bALL\\b", then="Yes", else="No") AS HasALL,
+                 if(condition=Line =~ "^\\s*%", then="GroupRule", else="UserRule") AS RuleType,
+                 if(condition=Line =~ "(?i)(/bin/bash|/bin/sh|/usr/bin/python|/usr/bin/perl|/usr/bin/ruby|vi|vim|nano|less|more|find|tar|zip|systemctl|service|chmod|chown)",
+                    then="Yes",
+                    else="No") AS HasRiskyCommand,
+                 if(condition=Line =~ "(?i)NOPASSWD",
+                    then="Review immediately",
+                    else=if(condition=Line =~ "\\bALL\\b",
+                            then="Review privilege scope",
+                            else="Review if unexpected")) AS Recommendation
+          FROM parse_lines(filename=SudoersFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )

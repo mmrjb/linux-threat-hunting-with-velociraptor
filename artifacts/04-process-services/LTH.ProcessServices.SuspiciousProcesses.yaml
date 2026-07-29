@@ -1,0 +1,41 @@
+name: LTH.ProcessServices.SuspiciousProcesses
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.4 Processes and Services
+
+  This artifact identifies suspicious Linux processes based on execution path,
+  deleted executables, suspicious command lines, reverse shell patterns,
+  downloaders, scripting engines, and temporary writable directories.
+
+type: CLIENT
+
+sources:
+  - name: SuspiciousProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             RSS,
+             Deleted,
+             if(condition=Deleted,
+                then="HIGH",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=Deleted,
+                then="Deleted executable",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="Execution from writable or temporary path",
+                        else="Suspicious command line")) AS Reason
+      FROM Artifact.LTH.ProcessServices.Pslist()
+      WHERE Deleted
+         OR Exe =~ "^/(tmp|var/tmp|dev/shm|home)/"
+         OR CommandLine =~ "(?i)(bash -c|bash -i|/dev/tcp|nc |ncat|netcat|socat|curl|wget|python -c|python3 -c|perl -e|ruby -e|base64 -d|chmod \\+x|xmrig|miner|chisel|ngrok|frp)"

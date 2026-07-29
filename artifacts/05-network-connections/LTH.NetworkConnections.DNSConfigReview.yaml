@@ -1,0 +1,50 @@
+name: LTH.NetworkConnections.DNSConfigReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.5 Network Connections
+
+  This artifact reviews Linux DNS configuration files such as /etc/resolv.conf,
+  /etc/hosts, and systemd-resolved configuration.
+
+  It helps identify unusual DNS servers, suspicious host overrides,
+  and DNS configuration changes that may support attacker infrastructure.
+
+type: CLIENT
+
+parameters:
+  - name: DNSConfigGlob
+    default: /etc/resolv.conf,/etc/hosts,/etc/systemd/resolved.conf,/etc/systemd/resolved.conf.d/*
+    description: Comma-separated DNS configuration files to review.
+
+sources:
+  - name: DNSConfigLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET DNSFiles <=
+        SELECT OSPath AS DNSFile
+        FROM glob(globs=split(string=DNSConfigGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=DNSFiles,
+        query={
+          SELECT DNSFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)^\\s*nameserver\\s+(8\\.8\\.8\\.8|1\\.1\\.1\\.1|9\\.9\\.9\\.9|208\\.67\\.)",
+                    then="MEDIUM",
+                    else=if(condition=Line =~ "(?i)(127\\.0\\.0\\.1|0\\.0\\.0\\.0|localhost)",
+                            then="INFO",
+                            else="INFO")) AS Severity,
+                 if(condition=Line =~ "(?i)^\\s*nameserver",
+                    then="DNS nameserver entry",
+                    else=if(condition=Line =~ "(?i)^\\s*[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+\\s+",
+                            then="Hosts file mapping",
+                            else="DNS configuration line")) AS Reason
+          FROM parse_lines(filename=DNSFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )

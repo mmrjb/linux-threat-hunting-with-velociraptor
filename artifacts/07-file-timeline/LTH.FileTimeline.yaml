@@ -1,0 +1,84 @@
+name: LTH.FileTimeline
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.7 File System and Timeline Analysis
+
+  This wrapper artifact collects Linux filesystem and timeline evidence,
+  including file finder results, anomalous files, recent sensitive file changes,
+  executable files in temp paths, web root changes, and archive/dump files.
+
+type: CLIENT
+
+implied_permissions:
+  - FILESYSTEM_READ
+
+sources:
+  - name: FileFinder
+    description: General file finder results with optional hashing.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.FileFinder()
+
+  - name: AnomalousFiles
+    description: Hidden, large, or SUID-like anomalous files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.AnomalousFiles()
+
+  - name: RecentSensitiveFiles
+    description: Recently modified files in sensitive paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.RecentSensitiveFiles(source="RecentSensitiveFiles")
+
+  - name: SensitiveTimelineEvents
+    description: MTime and CTime timeline events from recent sensitive files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.RecentSensitiveFiles(source="SensitiveTimelineEvents")
+
+  - name: TempExecutableFiles
+    description: Executable or script-like files in writable/temp paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.TempExecutableFiles()
+
+  - name: WebRootChanges
+    description: Recently modified files under common web root directories.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.WebRootChanges()
+
+  - name: ArchiveAndDumpFiles
+    description: Archive, backup, and dump files in monitored paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.FileTimeline.ArchiveAndDumpFiles()

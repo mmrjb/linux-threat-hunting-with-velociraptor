@@ -1,0 +1,118 @@
+name: LTH.SystemBaseline
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.1 System Baseline
+
+  This wrapper artifact collects baseline information from Linux endpoints.
+  It groups cloned baseline artifacts into one collection for hunting,
+  notebook analysis, and reporting.
+
+type: CLIENT
+
+sources:
+  - name: Client_BasicInformation
+    description: Basic client information such as hostname, OS, architecture, platform and network MAC addresses.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.ClientInfo(source="BasicInformation")
+
+  - name: Client_LinuxInfo
+    description: Linux-specific client information such as system information and network interfaces.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.ClientInfo(source="LinuxInfo")
+
+  - name: Mounts
+    description: Mounted filesystems and mount points.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.Mounts()
+
+  - name: Users
+    description: Local Linux users from the cloned users artifact.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.Users()
+
+  - name: Processes
+    description: Running processes on the endpoint.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.Pslist()
+
+  - name: Services
+    description: Linux services and their state.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.Services()
+
+  - name: NetworkConnections
+    description: Listening and established network connections enriched with process information.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.NetstatEnriched()
+
+  - name: Crontab
+    description: Scheduled cron jobs and related scheduled task information.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.Crontab()
+
+  - name: DebianPackages
+    description: Installed Debian/Ubuntu packages. This source only runs on Debian-based systems.
+    precondition: |
+      SELECT *
+      FROM glob(globs=[
+        "/etc/debian_version",
+        "/etc/apt/sources.list"
+      ])
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.DebianPackages()
+
+  - name: RHELPackages
+    description: Installed RHEL/CentOS/Rocky/Alma packages. This source only runs on RHEL-based systems.
+    precondition: |
+      SELECT *
+      FROM glob(globs=[
+        "/etc/redhat-release",
+        "/etc/rocky-release",
+        "/etc/almalinux-release",
+        "/etc/centos-release",
+        "/etc/oracle-release"
+      ])
+    query: |
+      SELECT *
+      FROM Artifact.LTH.SystemBaseline.RHELPackages()

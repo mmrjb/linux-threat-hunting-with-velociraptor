@@ -1,0 +1,31 @@
+name: LTH.ProcessServices.SuspiciousServices
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.4 Processes and Services
+
+  This artifact identifies suspicious active services based on service name
+  and description patterns commonly associated with tunneling tools,
+  reverse shells, miners, backdoors, and remote access utilities.
+
+type: CLIENT
+
+sources:
+  - name: SuspiciousServices
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Unit,
+             Load,
+             Active,
+             Sub,
+             Description,
+             "MEDIUM" AS Severity,
+             "Suspicious service name or description" AS Reason
+      FROM Artifact.LTH.ProcessServices.Services()
+      WHERE Active =~ "active"
+        AND (
+             Unit =~ "(?i)(nc|ncat|netcat|socat|ngrok|frp|chisel|xmrig|miner|backdoor|shell|reverse|tunnel)"
+             OR Description =~ "(?i)(nc|ncat|netcat|socat|ngrok|frp|chisel|xmrig|miner|backdoor|shell|reverse|tunnel)"
+        )

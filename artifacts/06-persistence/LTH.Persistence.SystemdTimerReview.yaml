@@ -1,0 +1,64 @@
+name: LTH.Persistence.SystemdTimerReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This artifact reviews systemd timer files. Timers can be used for
+  scheduled persistence, recurring command execution, and delayed execution.
+
+type: CLIENT
+
+parameters:
+  - name: TimerFileGlob
+    default: /etc/systemd/system/**/*.timer,/lib/systemd/system/**/*.timer,/usr/lib/systemd/system/**/*.timer
+    description: Comma-separated systemd timer file globs.
+
+sources:
+  - name: SystemdTimerLines
+    description: Important systemd timer unit lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET TimerFiles <=
+        SELECT OSPath AS TimerFile
+        FROM glob(globs=split(string=TimerFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=TimerFiles,
+        query={
+          SELECT TimerFile AS Path,
+                 Line
+          FROM parse_lines(filename=TimerFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )
+
+  - name: SuspiciousSystemdTimerLines
+    description: Suspicious systemd timer lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET TimerFiles <=
+        SELECT OSPath AS TimerFile
+        FROM glob(globs=split(string=TimerFileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=TimerFiles,
+        query={
+          SELECT TimerFile AS Path,
+                 Line,
+                 "MEDIUM" AS Severity,
+                 "Systemd timer should be reviewed for scheduled persistence" AS Reason
+          FROM parse_lines(filename=TimerFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(OnBootSec|OnStartupSec|OnUnitActiveSec|OnCalendar|Persistent=true)"
+        }
+      )

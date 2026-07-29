@@ -1,0 +1,68 @@
+name: LTH.Persistence.ShellProfileReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.6 Persistence Mechanisms
+
+  This artifact reviews user shell startup files such as .bashrc, .profile,
+  .bash_profile, .zshrc, and .bash_login for persistence indicators.
+
+type: CLIENT
+
+parameters:
+  - name: ShellProfileGlob
+    default: /root/.bashrc,/root/.profile,/root/.bash_profile,/root/.bash_login,/root/.zshrc,/home/*/.bashrc,/home/*/.profile,/home/*/.bash_profile,/home/*/.bash_login,/home/*/.zshrc
+    description: Comma-separated shell profile files.
+
+sources:
+  - name: ShellProfileLines
+    description: Shell profile lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET ProfileFiles <=
+        SELECT OSPath AS ProfileFile
+        FROM glob(globs=split(string=ShellProfileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=ProfileFiles,
+        query={
+          SELECT ProfileFile AS Path,
+                 Line
+          FROM parse_lines(filename=ProfileFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )
+
+  - name: SuspiciousShellProfileLines
+    description: Suspicious shell profile persistence lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET ProfileFiles <=
+        SELECT OSPath AS ProfileFile
+        FROM glob(globs=split(string=ShellProfileGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=ProfileFiles,
+        query={
+          SELECT ProfileFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/)",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/)",
+                    then="Shell startup references writable or temporary path",
+                    else="Suspicious shell startup command") AS Reason
+          FROM parse_lines(filename=ProfileFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(curl|wget|nc |ncat|netcat|socat|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d|chmod \\+x|/tmp/|/var/tmp/|/dev/shm/|chisel|ngrok|frp|xmrig|miner)"
+        }
+      )

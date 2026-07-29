@@ -1,0 +1,47 @@
+name: LTH.NetworkConnections.FirewallRules
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.5 Network Connections
+
+  This artifact collects Linux firewall rules from iptables, nftables, and ufw
+  when available. Missing tools are skipped safely.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: FirewallRules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Iptables <=
+        SELECT "iptables-save" AS Tool,
+               Stdout,
+               Stderr,
+               ReturnCode
+        FROM execve(argv=["/bin/sh", "-c", "command -v iptables-save >/dev/null 2>&1 && iptables-save 2>/dev/null || true"])
+
+      LET Nftables <=
+        SELECT "nft list ruleset" AS Tool,
+               Stdout,
+               Stderr,
+               ReturnCode
+        FROM execve(argv=["/bin/sh", "-c", "command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null || true"])
+
+      LET Ufw <=
+        SELECT "ufw status verbose" AS Tool,
+               Stdout,
+               Stderr,
+               ReturnCode
+        FROM execve(argv=["/bin/sh", "-c", "command -v ufw >/dev/null 2>&1 && ufw status verbose 2>/dev/null || true"])
+
+      SELECT *
+      FROM chain(
+        a=Iptables,
+        b=Nftables,
+        c=Ufw
+      )

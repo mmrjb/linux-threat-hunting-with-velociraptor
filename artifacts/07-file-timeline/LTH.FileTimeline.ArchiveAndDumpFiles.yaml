@@ -1,0 +1,48 @@
+name: LTH.FileTimeline.ArchiveAndDumpFiles
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.7 File System and Timeline Analysis
+
+  This artifact identifies archive, backup, database dump, and staging files
+  in user, temporary, and web directories.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: ArchiveGlobs
+    default: /home/*/**10,/root/**10,/tmp/**10,/var/tmp/**10,/dev/shm/**10,/var/www/**10,/srv/www/**10
+    description: Comma-separated paths to search for archive and dump files.
+
+  - name: MinSize
+    type: int
+    default: 1048576
+    description: Minimum file size in bytes.
+
+sources:
+  - name: ArchiveAndDumpFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT OSPath,
+             Size,
+             Mode.String AS Mode,
+             Mtime AS MTime,
+             Ctime AS CTime,
+             Atime AS ATime,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             "Archive, backup, or dump file found in monitored path" AS Reason
+      FROM glob(
+        globs=split(string=ArchiveGlobs, sep_string=","),
+        recursion_callback="x=>NOT x.OSPath =~ '^/(proc|sys|run|snap)'",
+        nosymlink=TRUE
+      )
+      WHERE NOT IsDir
+        AND Size > MinSize
+        AND OSPath =~ "(?i)(\\.zip$|\\.tar$|\\.tar\\.gz$|\\.tgz$|\\.7z$|\\.rar$|\\.gz$|\\.sql$|\\.dump$|\\.bak$|\\.backup$)"

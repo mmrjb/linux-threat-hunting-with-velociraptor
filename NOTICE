@@ -1,0 +1,18 @@
+Linux Threat Hunting with Velociraptor
+Copyright (C) 2026 Mohammadmahdi Rajabzadeh
+
+This distribution contains original framework design, wrapper artifacts,
+tuning, hunting workflow, validation tooling, and documentation.
+
+Selected collector definitions are adapted from artifacts distributed with
+Velociraptor:
+
+    https://github.com/Velocidex/velociraptor
+
+Velociraptor is licensed under the GNU Affero General Public License,
+version 3. Upstream copyright and contribution history remain with the
+Velociraptor project and its contributors.
+
+This project is independent and is not affiliated with, sponsored by, or
+endorsed by the Velociraptor project, Velocidex, or Rapid7.
+

@@ -1,0 +1,61 @@
+name: LTH.NetworkConnections
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.5 Network Connections
+
+  This wrapper artifact collects Linux network connection evidence,
+  including enriched netstat connections, suspicious connections,
+  routing table, DNS configuration, and firewall rules.
+
+type: CLIENT
+
+sources:
+  - name: NetstatEnriched
+    description: Network connections enriched with process information.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.NetworkConnections.NetstatEnriched()
+
+  - name: SuspiciousConnections
+    description: Suspicious network connections and listening ports.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.NetworkConnections.SuspiciousConnections()
+
+  - name: RoutingTable
+    description: Linux routing table information.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.NetworkConnections.RoutingTable()
+
+  - name: DNSConfigReview
+    description: DNS configuration lines from resolv.conf, hosts, and systemd-resolved.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.NetworkConnections.DNSConfigReview()
+
+  - name: FirewallRules
+    description: Firewall rules from iptables, nftables, and ufw when available.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.NetworkConnections.FirewallRules()
