@@ -8,7 +8,7 @@ The project is designed for repeatable fleet-wide collection, fast analyst triag
 
 | Metric | Value |
 | --- | ---: |
-| Velociraptor version used for export | `0.76.5` |
+| Velociraptor version used | `0.76.5` |
 | Artifact definitions | 114 |
 | Investigation domains | 14 |
 | Internal `LTH.*` dependencies resolved | 100 / 100 |
