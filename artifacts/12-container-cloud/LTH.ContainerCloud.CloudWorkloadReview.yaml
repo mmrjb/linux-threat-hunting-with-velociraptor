@@ -1,0 +1,115 @@
+name: LTH.ContainerCloud.CloudWorkloadReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews cloud workload indicators such as cloud agents,
+  cloud-init files, cloud configuration inventory, and suspicious cloud-related
+  command or credential indicators.
+
+  Sensitive config lines are not returned directly. Only path, line number,
+  and indicator type are returned.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: CloudAgentProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             "INFO" AS Severity,
+             "Cloud workload or cloud agent process" AS Reason
+      FROM Artifact.LTH.ContainerCloud.Pslist()
+      WHERE Name =~ "(?i)(amazon-ssm-agent|amazon-cloudwatch-agent|waagent|google-guest-agent|google-osconfig-agent|osconfig_agent|cloud-init|cloudflared)"
+         OR CommandLine =~ "(?i)(amazon-ssm-agent|amazon-cloudwatch-agent|waagent|google-guest-agent|google-osconfig-agent|osconfig_agent|cloud-init|metadata\\.google|169\\.254\\.169\\.254)"
+
+  - name: CloudConfigFileInventory
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/cloud /var/lib/cloud /etc/aws /etc/google-cloud /etc/azure /root/.aws /home; do [ -e \"$d\" ] && find \"$d\" -maxdepth 5 -type f -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             "INFO" AS Severity,
+             "Cloud-related configuration or state file" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousCloudConfigIndicators
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/cloud /var/lib/cloud /etc/aws /etc/google-cloud /etc/azure /root/.aws /home; do [ -e \"$d\" ] && find \"$d\" -maxdepth 5 -type f -size -5M -print 2>/dev/null; done | while IFS= read -r f; do awk 'BEGIN{IGNORECASE=1} /aws_access_key_id|aws_secret_access_key|password|passwd|token/ {print FILENAME \"\t\" NR \"\tCredential or secret keyword\"; next} /169\\.254\\.169\\.254|metadata\\.google/ {print FILENAME \"\t\" NR \"\tCloud metadata service reference\"; next} /curl|wget|bash -i|\\/dev\\/tcp|base64 -d/ {print FILENAME \"\t\" NR \"\tSuspicious command or staging keyword\"; next}' \"$f\" 2>/dev/null; done || true"])
+
+      LET Indicators <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Path,
+               split(string=Line, sep_string="\t")[1] AS LineNumber,
+               split(string=Line, sep_string="\t")[2] AS IndicatorType
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Path,
+             LineNumber,
+             IndicatorType AS Indicator,
+             if(condition=IndicatorType =~ "(?i)(credential|secret|password|token)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             IndicatorType AS Reason
+      FROM Indicators
+
+  - name: MetadataAccessProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             "MEDIUM" AS Severity,
+             "Process command line references cloud metadata service" AS Reason
+      FROM Artifact.LTH.ContainerCloud.Pslist()
+      WHERE CommandLine =~ "(?i)(169\\.254\\.169\\.254|metadata\\.google|metadata/instance|latest/meta-data)"

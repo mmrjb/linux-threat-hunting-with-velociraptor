@@ -1,0 +1,65 @@
+name: LTH.DataExfil.SensitivePathReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact inventories sensitive files and credential-like files that
+  attackers may target for collection and exfiltration. It does not return
+  file contents.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+parameters:
+  - name: SearchCommand
+    default: |
+      for p in \
+        /etc/passwd /etc/shadow /etc/group /etc/sudoers \
+        /root/.ssh /home/*/.ssh \
+        /root/.aws /home/*/.aws \
+        /root/.config/gcloud /home/*/.config/gcloud \
+        /root/.azure /home/*/.azure \
+        /etc/ssh /etc/kubernetes /var/lib/kubelet /etc/docker /etc/containerd \
+        /var/www /srv/www /opt
+      do
+        find $p -maxdepth 5 -type f \
+          \( -name 'id_rsa' -o -name 'id_dsa' -o -name 'id_ecdsa' -o -name 'id_ed25519' \
+          -o -name 'authorized_keys' -o -name 'known_hosts' \
+          -o -name 'credentials' -o -name 'config' -o -name '*.pem' -o -name '*.key' \
+          -o -name '*.p12' -o -name '*.pfx' -o -name '*.kubeconfig' -o -name 'kubeconfig' \
+          -o -name '*.env' -o -name '.env' -o -name '*secret*' -o -name '*token*' \) \
+          -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null
+      done 2>/dev/null || true
+    description: Search command used to inventory sensitive files.
+
+sources:
+  - name: SensitiveFilesInventory
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "(?i)(shadow|id_rsa|id_dsa|id_ecdsa|id_ed25519|\\.pem$|\\.key$|credentials|secret|token|\\.env$)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             "Sensitive or credential-like file inventory" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

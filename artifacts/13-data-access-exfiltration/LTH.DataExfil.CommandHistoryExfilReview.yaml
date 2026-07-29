@@ -1,0 +1,51 @@
+name: LTH.DataExfil.CommandHistoryExfilReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact reviews shell history for data staging, compression,
+  remote transfer, object storage upload, and exfiltration-related commands.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: ExfilCommandHistory
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for f in /root/.bash_history /root/.zsh_history /home/*/.bash_history /home/*/.zsh_history; do [ -f \"$f\" ] && awk '{print FILENAME \"\t\" NR \"\t\" $0}' \"$f\" 2>/dev/null; done | egrep -i '(tar |zip |7z|gzip|scp |sftp |rsync |rclone |aws s3|s3cmd|gsutil|az storage|gcloud|curl |wget |nc |ncat|netcat|socat|openssl enc|gpg |base64)' || true"])
+
+      LET Lines <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Path,
+               split(string=Line, sep_string="\t")[1] AS LineNumber,
+               split(string=Line, sep_string="\t")[2] AS CommandLine
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Path,
+             LineNumber,
+             CommandLine,
+             if(condition=CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud|scp|sftp|rsync|nc |ncat|netcat|socat)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud)",
+                then="Cloud/object storage transfer command in history",
+                else=if(condition=CommandLine =~ "(?i)(scp|sftp|rsync)",
+                        then="Remote file transfer command in history",
+                        else=if(condition=CommandLine =~ "(?i)(tar |zip |7z|gzip)",
+                                then="Compression or staging command in history",
+                                else="Exfiltration-related command history entry"))) AS Reason
+      FROM Lines

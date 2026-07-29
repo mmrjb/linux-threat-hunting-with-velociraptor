@@ -1,0 +1,43 @@
+name: LTH.PrivEsc.RootProcessIndicators
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact identifies suspicious root-owned processes that may indicate
+  privilege escalation, such as root processes from writable paths, deleted
+  executables, reverse shells, or suspicious command lines.
+
+type: CLIENT
+
+sources:
+  - name: RootProcessIndicators
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             if(condition=Deleted,
+                then="HIGH",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=Deleted,
+                then="Root process with deleted executable",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="Root process from writable or user-controlled path",
+                        else="Suspicious root command line")) AS Reason
+      FROM Artifact.LTH.PrivEsc.Pslist()
+      WHERE Username =~ "^root$"
+        AND (
+             Deleted
+             OR Exe =~ "^/(tmp|var/tmp|dev/shm|home)/"
+             OR CommandLine =~ "(?i)(bash -c|bash -i|/dev/tcp|nc |ncat|netcat|socat|curl|wget|python -c|python3 -c|perl -e|ruby -e|base64 -d|chmod \\+x|chisel|ngrok|frp|xmrig|miner)"
+        )

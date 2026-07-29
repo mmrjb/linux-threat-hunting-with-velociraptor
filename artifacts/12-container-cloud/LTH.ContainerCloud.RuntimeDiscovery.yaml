@@ -1,0 +1,108 @@
+name: LTH.ContainerCloud.RuntimeDiscovery
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact discovers container runtime tools and important container
+  runtime sockets or configuration paths.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: RuntimeTools
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for t in docker podman crictl nerdctl kubectl kubelet containerd dockerd crio runc; do if command -v $t >/dev/null 2>&1; then p=$(command -v $t); v=$($t --version 2>&1 | head -n 1 | tr '\t' ' '); printf '%s\tInstalled\t%s\t%s\n' \"$t\" \"$p\" \"$v\"; else printf '%s\tNotInstalled\t-\t-\n' \"$t\"; fi; done"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Tool,
+             split(string=Line, sep_string="\t")[1] AS Status,
+             split(string=Line, sep_string="\t")[2] AS Path,
+             split(string=Line, sep_string="\t")[3] AS Version,
+             "INFO" AS Severity,
+             "Container runtime tool discovery" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: RuntimeSockets
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for s in /var/run/docker.sock /run/docker.sock /run/containerd/containerd.sock /var/run/crio/crio.sock /run/podman/podman.sock /var/run/podman/podman.sock /etc/kubernetes/kubelet.conf /var/lib/kubelet/pki/kubelet-client-current.pem; do [ -e \"$s\" ] && stat -c '%n\t%F\t%a\t%U\t%G\t%s\t%y' \"$s\" 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS FileType,
+             split(string=Line, sep_string="\t")[2] AS OctalMode,
+             split(string=Line, sep_string="\t")[3] AS Owner,
+             split(string=Line, sep_string="\t")[4] AS Group,
+             split(string=Line, sep_string="\t")[5] AS Size,
+             split(string=Line, sep_string="\t")[6] AS MTime,
+             if(condition=Line =~ "(docker.sock|containerd.sock|crio.sock|podman.sock)",
+                then="MEDIUM",
+                else="INFO") AS Severity,
+             "Container runtime socket or sensitive runtime file found" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousRuntimeSockets
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for s in /var/run/docker.sock /run/docker.sock /run/containerd/containerd.sock /var/run/crio/crio.sock /run/podman/podman.sock /var/run/podman/podman.sock; do [ -e \"$s\" ] && stat -c '%n\t%F\t%a\t%U\t%G\t%s\t%y' \"$s\" 2>/dev/null; done || true"])
+
+      LET Sockets <=
+        SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+               split(string=Line, sep_string="\t")[1] AS FileType,
+               split(string=Line, sep_string="\t")[2] AS OctalMode,
+               split(string=Line, sep_string="\t")[3] AS Owner,
+               split(string=Line, sep_string="\t")[4] AS Group,
+               split(string=Line, sep_string="\t")[5] AS Size,
+               split(string=Line, sep_string="\t")[6] AS MTime
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT OSPath,
+             FileType,
+             OctalMode,
+             Owner,
+             Group,
+             Size,
+             MTime,
+             "HIGH" AS Severity,
+             "Container runtime socket is exposed or requires review" AS Reason
+      FROM Sockets
+      WHERE OctalMode =~ "(666|777|776|766|667|677)"
+         OR Group =~ "(docker|podman|containerd)"

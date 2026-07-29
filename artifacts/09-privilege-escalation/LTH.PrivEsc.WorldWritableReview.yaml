@@ -1,0 +1,93 @@
+name: LTH.PrivEsc.WorldWritableReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact identifies world-writable files and directories using the Linux
+  find command. This method is more reliable than matching Mode.String because
+  permission string formatting may differ between Velociraptor versions.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+parameters:
+  - name: SearchCommand
+    default: |
+      find /etc /usr/local/bin /opt /var/www /srv/www /tmp /var/tmp /dev/shm /home \
+      -xdev -maxdepth 10 \( -type f -o -type d \) -perm -0002 \
+      -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\t%y\n' 2>/dev/null || true
+    description: find command used to identify world-writable files and directories.
+
+sources:
+  - name: WorldWritableFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             split(string=Line, sep_string="\t")[6] AS FileType,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/(etc|usr/local/bin|opt|var/www|srv/www)/",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/(etc|usr/local/bin|opt|var/www|srv/www)/",
+                then="World-writable object in sensitive path",
+                else="World-writable object requires review") AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousWorldWritableFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      LET WorldWritable <=
+        SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+               split(string=Line, sep_string="\t")[1] AS OctalMode,
+               split(string=Line, sep_string="\t")[2] AS Owner,
+               split(string=Line, sep_string="\t")[3] AS Group,
+               split(string=Line, sep_string="\t")[4] AS Size,
+               split(string=Line, sep_string="\t")[5] AS MTime,
+               split(string=Line, sep_string="\t")[6] AS FileType
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT OSPath,
+             OctalMode,
+             Owner,
+             Group,
+             Size,
+             MTime,
+             FileType,
+             "HIGH" AS Severity,
+             "World-writable object in sensitive path" AS Reason
+      FROM WorldWritable
+      WHERE OSPath =~ "^/(etc|usr/local/bin|opt|var/www|srv/www)/"

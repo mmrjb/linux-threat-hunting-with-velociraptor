@@ -1,0 +1,75 @@
+name: LTH.LogSecurityEvents.CommandHistoryReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.8 Logs and Security Events
+
+  This artifact reviews Linux user command history files such as .bash_history
+  and .zsh_history. It highlights suspicious commands, downloaders, reverse
+  shell patterns, encoding/decoding, and attacker tooling.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: HistoryGlobs
+    default: /root/.bash_history,/root/.zsh_history,/home/*/.bash_history,/home/*/.zsh_history
+    description: Comma-separated shell history files.
+
+sources:
+  - name: CommandHistoryLines
+    description: Command history lines from user history files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET HistoryFiles <=
+        SELECT OSPath AS HistoryFile
+        FROM glob(globs=split(string=HistoryGlobs, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=HistoryFiles,
+        query={
+          SELECT HistoryFile AS Path,
+                 Line
+          FROM parse_lines(filename=HistoryFile)
+          WHERE NOT Line =~ "^\\s*$"
+        }
+      )
+
+  - name: SuspiciousCommandHistory
+    description: Suspicious commands from shell history files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET HistoryFiles <=
+        SELECT OSPath AS HistoryFile
+        FROM glob(globs=split(string=HistoryGlobs, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=HistoryFiles,
+        query={
+          SELECT HistoryFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(bash -i|/dev/tcp|nc |ncat|netcat|socat|chisel|ngrok|frp|xmrig|miner)",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity,
+                 if(condition=Line =~ "(?i)(bash -i|/dev/tcp)",
+                    then="Reverse shell pattern in command history",
+                    else=if(condition=Line =~ "(?i)(curl|wget).*(sh|bash|chmod|/tmp|/var/tmp|/dev/shm)",
+                            then="Downloader or staged execution in command history",
+                            else=if(condition=Line =~ "(?i)(base64 -d|openssl enc|gpg)",
+                                    then="Encoding or encryption command in history",
+                                    else="Suspicious command history entry"))) AS Reason
+          FROM parse_lines(filename=HistoryFile)
+          WHERE Line =~ "(?i)(curl|wget|bash -i|bash -c|/dev/tcp|nc |ncat|netcat|socat|python -c|python3 -c|perl -e|base64 -d|chmod \\+x|/tmp/|/var/tmp/|/dev/shm/|chisel|ngrok|frp|xmrig|miner|sshpass|hydra|nmap|masscan)"
+        }
+      )

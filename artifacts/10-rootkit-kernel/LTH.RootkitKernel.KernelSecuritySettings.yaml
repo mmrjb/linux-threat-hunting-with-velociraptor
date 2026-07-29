@@ -1,0 +1,71 @@
+name: LTH.RootkitKernel.KernelSecuritySettings
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact collects security-relevant kernel sysctl settings and highlights
+  weak settings that may increase risk of kernel-level abuse or information leak.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: KernelSecuritySettings
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for k in kernel.modules_disabled kernel.kptr_restrict kernel.dmesg_restrict kernel.yama.ptrace_scope kernel.unprivileged_bpf_disabled kernel.perf_event_paranoid kernel.kexec_load_disabled fs.protected_hardlinks fs.protected_symlinks fs.protected_fifos fs.protected_regular; do v=$(sysctl -n $k 2>/dev/null); [ -n \"$v\" ] && printf '%s\\t%s\\n' \"$k\" \"$v\"; done"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Key,
+             split(string=Line, sep_string="\t")[1] AS Value
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: WeakKernelSecuritySettings
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for k in kernel.modules_disabled kernel.kptr_restrict kernel.dmesg_restrict kernel.yama.ptrace_scope kernel.unprivileged_bpf_disabled kernel.perf_event_paranoid kernel.kexec_load_disabled fs.protected_hardlinks fs.protected_symlinks fs.protected_fifos fs.protected_regular; do v=$(sysctl -n $k 2>/dev/null); [ -n \"$v\" ] && printf '%s\\t%s\\n' \"$k\" \"$v\"; done"])
+
+      LET Settings <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Key,
+               split(string=Line, sep_string="\t")[1] AS Value
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Key,
+             Value,
+             "MEDIUM" AS Severity,
+             "Kernel security setting requires review" AS Reason
+      FROM Settings
+      WHERE (Key = "kernel.kptr_restrict" AND Value = "0")
+         OR (Key = "kernel.dmesg_restrict" AND Value = "0")
+         OR (Key = "kernel.yama.ptrace_scope" AND Value = "0")
+         OR (Key = "kernel.unprivileged_bpf_disabled" AND Value = "0")
+         OR (Key = "kernel.kexec_load_disabled" AND Value = "0")
+         OR (Key = "fs.protected_hardlinks" AND Value = "0")
+         OR (Key = "fs.protected_symlinks" AND Value = "0")
+         OR (Key = "fs.protected_fifos" AND Value = "0")
+         OR (Key = "fs.protected_regular" AND Value = "0")

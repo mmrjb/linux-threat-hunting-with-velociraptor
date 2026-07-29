@@ -1,0 +1,106 @@
+name: LTH.DataExfil
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This wrapper artifact collects Linux data access and exfiltration indicators,
+  including transfer-related processes, network transfer connections, archive
+  and dump files, large recent files, sensitive file inventory, cloud CLI
+  configuration indicators, and exfiltration-related command history.
+
+type: CLIENT
+
+implied_permissions:
+  - EXECVE
+  - FILESYSTEM_READ
+
+sources:
+  - name: TransferProcesses
+    description: Data transfer, staging, compression, and cloud CLI processes.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.TransferProcessReview(source="TransferProcesses")
+
+  - name: NetworkTransferConnections
+    description: Network connections from transfer-related processes.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.NetworkTransferReview(source="NetworkTransferConnections")
+
+  - name: ArchiveDumpFiles
+    description: Archive, backup, dump, encrypted, or staging files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.ArchiveDumpReview(source="ArchiveDumpFiles")
+
+  - name: LargeRecentFiles
+    description: Large recently modified files in monitored paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.LargeRecentFiles(source="LargeRecentFiles")
+
+  - name: SensitiveFilesInventory
+    description: Sensitive or credential-like files inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.SensitivePathReview(source="SensitiveFilesInventory")
+
+  - name: CloudCliConfigInventory
+    description: Cloud CLI and object storage configuration file inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.CloudCliConfigReview(source="CloudCliConfigInventory")
+
+  - name: SuspiciousCloudCliIndicators
+    description: Cloud credential or object storage indicators without secret values.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.CloudCliConfigReview(source="SuspiciousCloudCliIndicators")
+
+  - name: ExfilCommandHistory
+    description: Exfiltration-related commands from shell history.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.CommandHistoryExfilReview(source="ExfilCommandHistory")
+
+  - name: FileFinder
+    description: General monitored file finder results.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.DataExfil.FileFinder()

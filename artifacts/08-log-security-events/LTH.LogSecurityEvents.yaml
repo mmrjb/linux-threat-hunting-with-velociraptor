@@ -1,0 +1,125 @@
+name: LTH.LogSecurityEvents
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.8 Logs and Security Events
+
+  This wrapper artifact collects Linux log and security event evidence,
+  including SSH logins, last user logins, authentication events, sudo/su
+  activity, user management events, service events, audit events, kernel
+  security messages, and command history.
+
+type: CLIENT
+
+implied_permissions:
+  - FILESYSTEM_READ
+
+sources:
+  - name: SSHLogin
+    description: SSH login attempts parsed from authentication logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SSHLogin()
+
+  - name: LastUserLogin
+    description: Last interactive login sessions from WTMP files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.LastUserLogin()
+
+  - name: AuthLogEvents
+    description: Authentication and SSH related log events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="AuthLogEvents")
+
+  - name: SudoSuEvents
+    description: sudo and su activity from authentication logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="SudoSuEvents")
+
+  - name: UserManagementEvents
+    description: User and group management events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="UserManagementEvents")
+
+  - name: ServiceEvents
+    description: Service start, stop, reload, enable, or disable events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="ServiceEvents")
+
+  - name: AuditEvents
+    description: Linux audit log security events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="AuditEvents")
+
+  - name: KernelSecurityEvents
+    description: Kernel security related log events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="KernelSecurityEvents")
+
+  - name: SuspiciousSecurityEvents
+    description: High value suspicious security events across logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.SecurityLogReview(source="SuspiciousSecurityEvents")
+
+  - name: CommandHistoryLines
+    description: User command history lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.CommandHistoryReview(source="CommandHistoryLines")
+
+  - name: SuspiciousCommandHistory
+    description: Suspicious command history entries.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.LogSecurityEvents.CommandHistoryReview(source="SuspiciousCommandHistory")

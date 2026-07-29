@@ -1,0 +1,95 @@
+name: LTH.PrivEsc.SUIDSGIDFiles
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact identifies SUID and SGID files using the Linux find command.
+  This method is more reliable than matching Mode.String because permission
+  string formatting may differ between Velociraptor versions.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+parameters:
+  - name: SearchCommand
+    default: |
+      find /bin /sbin /usr/bin /usr/sbin /usr/local/bin /opt /tmp /var/tmp /dev/shm /home \
+      -xdev -maxdepth 10 -type f \( -perm -4000 -o -perm -2000 \) \
+      -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null || true
+    description: find command used to identify SUID/SGID files.
+
+sources:
+  - name: SUIDSGIDFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                then="HIGH",
+                else=if(condition=split(string=Line, sep_string="\t")[0] =~ "(?i)/(bash|sh|find|vim|vi|nano|nmap|python|python3|perl|ruby|tar|cp|chmod|chown|mount|systemctl|env|awk|sed|less|more|socat|screen|tmux)$",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=split(string=Line, sep_string="\t")[1] =~ "^[46]",
+                then="SUID/SGID file detected",
+                else="Privilege-related file permission detected") AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousSUIDSGIDFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      LET AllSUID <=
+        SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+               split(string=Line, sep_string="\t")[1] AS OctalMode,
+               split(string=Line, sep_string="\t")[2] AS Owner,
+               split(string=Line, sep_string="\t")[3] AS Group,
+               split(string=Line, sep_string="\t")[4] AS Size,
+               split(string=Line, sep_string="\t")[5] AS MTime
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT OSPath,
+             OctalMode,
+             Owner,
+             Group,
+             Size,
+             MTime,
+             "HIGH" AS Severity,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                then="SUID/SGID file in writable or user-controlled path",
+                else="SUID/SGID on potentially dangerous binary") AS Reason
+      FROM AllSUID
+      WHERE OSPath =~ "^/(tmp|var/tmp|dev/shm|home)/"
+         OR OSPath =~ "(?i)/(bash|sh|find|vim|vi|nano|nmap|python|python3|perl|ruby|tar|cp|chmod|chown|mount|systemctl|env|awk|sed|less|more|socat|screen|tmux)$"

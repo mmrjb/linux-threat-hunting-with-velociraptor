@@ -1,0 +1,91 @@
+name: LTH.RootkitKernel.ProcAnomalyReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact reviews /proc process information for anomalies such as
+  deleted executables and suspicious memory mappings from writable paths.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: ProcProcessList
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /proc/[0-9]*; do pid=${d##*/}; comm=$(cat $d/comm 2>/dev/null); exe=$(readlink $d/exe 2>/dev/null); cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null); ppid=$(awk '/^PPid:/ {print $2}' $d/status 2>/dev/null); uid=$(awk '/^Uid:/ {print $2}' $d/status 2>/dev/null); printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \"$pid\" \"$ppid\" \"$uid\" \"$comm\" \"$exe\" \"$cmd\"; done 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Pid,
+             split(string=Line, sep_string="\t")[1] AS Ppid,
+             split(string=Line, sep_string="\t")[2] AS Uid,
+             split(string=Line, sep_string="\t")[3] AS Name,
+             split(string=Line, sep_string="\t")[4] AS Exe,
+             split(string=Line, sep_string="\t")[5] AS CommandLine
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: DeletedProcExecutables
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /proc/[0-9]*; do pid=${d##*/}; comm=$(cat $d/comm 2>/dev/null); exe=$(readlink $d/exe 2>/dev/null); cmd=$(tr '\\0' ' ' < $d/cmdline 2>/dev/null); echo \"$exe\" | grep -q '(deleted)' && printf '%s\\t%s\\t%s\\t%s\\n' \"$pid\" \"$comm\" \"$exe\" \"$cmd\"; done 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Pid,
+             split(string=Line, sep_string="\t")[1] AS Name,
+             split(string=Line, sep_string="\t")[2] AS Exe,
+             split(string=Line, sep_string="\t")[3] AS CommandLine,
+             "HIGH" AS Severity,
+             "Process executable is deleted" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousProcMaps
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /proc/[0-9]*; do pid=${d##*/}; comm=$(cat $d/comm 2>/dev/null); [ -r $d/maps ] && egrep -i '(deleted|/tmp/|/var/tmp/|/dev/shm/|/home/)' $d/maps 2>/dev/null | head -n 20 | sed \"s|^|$pid\\t$comm\\t|\"; done 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Pid,
+             split(string=Line, sep_string="\t")[1] AS Name,
+             split(string=Line, sep_string="\t")[2] AS MapLine,
+             if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                then="Process memory map references writable path",
+                else="Process memory map references deleted object") AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

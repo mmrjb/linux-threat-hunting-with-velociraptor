@@ -1,0 +1,260 @@
+name: LTH.LogSecurityEvents.SecurityLogReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.8 Logs and Security Events
+
+  This artifact reviews Linux security-related logs including authentication,
+  sudo/su activity, user management, service events, audit logs, and kernel
+  security messages.
+
+  Compressed log files are intentionally excluded to avoid parser errors
+  during general hunts.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: AuthLogGlob
+    default: /var/log/auth.log,/var/log/auth.log.1,/var/log/secure,/var/log/secure.1
+    description: Comma-separated authentication log files.
+
+  - name: SyslogGlob
+    default: /var/log/syslog,/var/log/syslog.1,/var/log/messages,/var/log/messages.1,/var/log/daemon.log,/var/log/daemon.log.1
+    description: Comma-separated system log files.
+
+  - name: AuditLogGlob
+    default: /var/log/audit/audit.log,/var/log/audit/audit.log.1
+    description: Comma-separated audit log files.
+
+  - name: KernelLogGlob
+    default: /var/log/kern.log,/var/log/kern.log.1,/var/log/messages,/var/log/messages.1
+    description: Comma-separated kernel log files.
+
+  - name: GeneralSecurityLogGlob
+    default: /var/log/auth.log,/var/log/auth.log.1,/var/log/secure,/var/log/secure.1,/var/log/syslog,/var/log/syslog.1,/var/log/messages,/var/log/messages.1,/var/log/audit/audit.log,/var/log/audit/audit.log.1,/var/log/kern.log,/var/log/kern.log.1
+    description: Comma-separated security logs for suspicious event review.
+
+sources:
+  - name: AuthLogEvents
+    description: Authentication and SSH related log events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=AuthLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)Failed password",
+                    then="Failed SSH Login",
+                    else=if(condition=Line =~ "(?i)Invalid user",
+                            then="Invalid SSH User",
+                            else=if(condition=Line =~ "(?i)Accepted password|Accepted publickey",
+                                    then="Successful SSH Login",
+                                    else=if(condition=Line =~ "(?i)authentication failure",
+                                            then="Authentication Failure",
+                                            else=if(condition=Line =~ "(?i)session opened|session closed",
+                                                    then="Session Event",
+                                                    else="Authentication Event"))))) AS EventCategory,
+                 if(condition=Line =~ "(?i)(Failed password|Invalid user|authentication failure)",
+                    then="MEDIUM",
+                    else=if(condition=Line =~ "(?i)(Accepted password|Accepted publickey).*root",
+                            then="HIGH",
+                            else="INFO")) AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(sshd|Failed password|Accepted password|Accepted publickey|Invalid user|authentication failure|session opened|session closed|pam_unix)"
+        }
+      )
+
+  - name: SudoSuEvents
+    description: sudo and su activity from authentication logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=AuthLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)sudo:",
+                    then="Sudo Event",
+                    else=if(condition=Line =~ "(?i)su:",
+                            then="SU Event",
+                            else="Privilege Session Event")) AS EventCategory,
+                 if(condition=Line =~ "(?i)(COMMAND=.*(curl|wget|nc |ncat|netcat|socat|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d))",
+                    then="HIGH",
+                    else="INFO") AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(sudo:|su:|pam_unix\\(sudo|pam_unix\\(su|COMMAND=)"
+        }
+      )
+
+  - name: UserManagementEvents
+    description: User and group management events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=GeneralSecurityLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 "User or group management event" AS EventCategory,
+                 "HIGH" AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(useradd|usermod|userdel|groupadd|groupmod|groupdel|passwd|chage|newusers|adduser|deluser)"
+        }
+      )
+
+  - name: ServiceEvents
+    description: Service start, stop, reload, enable, or disable events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=SyslogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 "Service event" AS EventCategory,
+                 if(condition=Line =~ "(?i)(ssh|sshd|cron|docker|nginx|apache|httpd|mysql|mariadb|postgres|auditd)",
+                    then="MEDIUM",
+                    else="INFO") AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(systemd|Started|Stopped|Reloaded|Starting|Stopping|enabled|disabled|daemon-reload|service)"
+        }
+      )
+
+  - name: AuditEvents
+    description: Linux audit log events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=AuditLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(ANOM|AVC|USER_AUTH|USER_ACCT|USER_CMD|EXECVE|SYSCALL|CRED)",
+                    then="Audit security event",
+                    else="Audit event") AS EventCategory,
+                 if(condition=Line =~ "(?i)(ANOM|AVC|denied|USER_CMD|EXECVE)",
+                    then="HIGH",
+                    else="INFO") AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(type=|audit|ANOM|AVC|USER_AUTH|USER_ACCT|USER_CMD|EXECVE|SYSCALL|CRED|denied)"
+        }
+      )
+
+  - name: KernelSecurityEvents
+    description: Kernel security related log events.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=KernelLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 "Kernel security event" AS EventCategory,
+                 if(condition=Line =~ "(?i)(tainted|module verification failed|apparmor=.*DENIED|SELinux|AVC|denied)",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(segfault|audit|apparmor|SELinux|AVC|DENIED|denied|blocked|iptables|nftables|module|tainted|oom-killer|firewall)"
+        }
+      )
+
+  - name: SuspiciousSecurityEvents
+    description: High value suspicious security events across logs.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET LogFiles <=
+        SELECT OSPath AS LogFile
+        FROM glob(globs=split(string=GeneralSecurityLogGlob, sep_string=","))
+        WHERE NOT IsDir
+          AND NOT OSPath =~ "\\.gz$"
+
+      SELECT *
+      FROM foreach(
+        row=LogFiles,
+        query={
+          SELECT LogFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)(Accepted password|Accepted publickey).*root",
+                    then="Root authentication event",
+                    else=if(condition=Line =~ "(?i)(Failed password|Invalid user|authentication failure)",
+                            then="Failed authentication event",
+                            else=if(condition=Line =~ "(?i)(useradd|usermod|userdel|groupadd|groupmod|groupdel|passwd)",
+                                    then="User management event",
+                                    else=if(condition=Line =~ "(?i)(COMMAND=.*(curl|wget|nc |ncat|netcat|socat|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d))",
+                                            then="Suspicious sudo command",
+                                            else=if(condition=Line =~ "(?i)(ANOM|AVC|denied|EXECVE|USER_CMD)",
+                                                    then="Audit suspicious event",
+                                                    else="Suspicious security event"))))) AS EventCategory,
+                 if(condition=Line =~ "(?i)(Accepted password|Accepted publickey).*root|COMMAND=.*(curl|wget|nc |ncat|netcat|socat|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d)|ANOM|AVC|denied|EXECVE|USER_CMD|useradd|usermod|userdel",
+                    then="HIGH",
+                    else="MEDIUM") AS Severity
+          FROM parse_lines(filename=LogFile)
+          WHERE Line =~ "(?i)(Failed password|Invalid user|authentication failure|Accepted password|Accepted publickey.*root|useradd|usermod|userdel|groupadd|groupmod|groupdel|passwd|COMMAND=.*(curl|wget|nc |ncat|netcat|socat|bash -i|/dev/tcp|python -c|python3 -c|perl -e|base64 -d)|ANOM|AVC|denied|EXECVE|USER_CMD|tainted|module verification failed|apparmor=.*DENIED)"
+        }
+      )

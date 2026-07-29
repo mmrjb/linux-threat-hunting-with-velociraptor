@@ -1,0 +1,156 @@
+name: LTH.PrivEsc
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This wrapper artifact collects Linux privilege escalation indicators,
+  including UID 0 users, privileged groups, risky sudoers rules, SUID/SGID
+  files, Linux file capabilities, world-writable sensitive paths, anomalous
+  files, and suspicious root processes.
+
+type: CLIENT
+
+implied_permissions:
+  - FILESYSTEM_READ
+  - EXECVE
+
+sources:
+  - name: Users
+    description: Local Linux users.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.Users()
+
+  - name: Groups
+    description: Local Linux groups.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.Groups()
+
+  - name: UID0Users
+    description: Non-root users with UID 0.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.PrivilegedGroupsReview(source="UID0Users")
+
+  - name: PrivilegedGroups
+    description: Sensitive and privileged group memberships.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.PrivilegedGroupsReview(source="PrivilegedGroups")
+
+  - name: SudoersRules
+    description: Active sudoers rules.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.SudoersReview(source="SudoersRules")
+
+  - name: RiskySudoersRules
+    description: Risky sudoers rules.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.SudoersReview(source="RiskySudoersRules")
+
+  - name: SUIDSGIDFiles
+    description: SUID and SGID files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.SUIDSGIDFiles(source="SUIDSGIDFiles")
+
+  - name: SuspiciousSUIDSGIDFiles
+    description: Suspicious SUID/SGID files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.SUIDSGIDFiles(source="SuspiciousSUIDSGIDFiles")
+
+  - name: FileCapabilities
+    description: Linux file capabilities.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.FileCapabilities(source="FileCapabilities")
+
+  - name: SuspiciousFileCapabilities
+    description: Dangerous Linux file capabilities.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.FileCapabilities(source="SuspiciousFileCapabilities")
+
+  - name: WorldWritableFiles
+    description: World-writable files and directories.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.WorldWritableReview(source="WorldWritableFiles")
+
+  - name: SuspiciousWorldWritableFiles
+    description: World-writable objects in sensitive paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.WorldWritableReview(source="SuspiciousWorldWritableFiles")
+
+  - name: AnomalousFiles
+    description: Hidden, large, or SUID-like anomalous files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.AnomalousFiles()
+
+  - name: RootProcessIndicators
+    description: Suspicious root-owned process indicators.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.PrivEsc.RootProcessIndicators()

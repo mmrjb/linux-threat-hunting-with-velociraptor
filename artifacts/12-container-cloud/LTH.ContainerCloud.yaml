@@ -1,0 +1,206 @@
+name: LTH.ContainerCloud
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This wrapper artifact collects container and cloud workload evidence,
+  including runtime discovery, Docker and Podman containers, Kubernetes
+  configuration, container runtime configuration, cloud agents, cloud config
+  indicators, and suspicious container/cloud findings.
+
+type: CLIENT
+
+implied_permissions:
+  - EXECVE
+  - FILESYSTEM_READ
+
+sources:
+  - name: RuntimeTools
+    description: Container runtime tool discovery.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.RuntimeDiscovery(source="RuntimeTools")
+
+  - name: RuntimeSockets
+    description: Container runtime sockets and sensitive runtime files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.RuntimeDiscovery(source="RuntimeSockets")
+
+  - name: SuspiciousRuntimeSockets
+    description: Runtime sockets with risky permissions or sensitive exposure.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.RuntimeDiscovery(source="SuspiciousRuntimeSockets")
+
+  - name: ContainerRuntimeProcesses
+    description: Container and cloud workload related processes.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.ContainerProcessReview(source="ContainerRuntimeProcesses")
+
+  - name: SuspiciousContainerProcesses
+    description: Suspicious container or cloud workload related processes.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.ContainerProcessReview(source="SuspiciousContainerProcesses")
+
+  - name: DockerContainers
+    description: Docker container inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.DockerReview(source="DockerContainers")
+
+  - name: SuspiciousDockerContainers
+    description: Suspicious Docker container configurations.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.DockerReview(source="SuspiciousDockerContainers")
+
+  - name: DockerImages
+    description: Docker image inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.DockerReview(source="DockerImages")
+
+  - name: PodmanContainers
+    description: Podman container inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.PodmanReview(source="PodmanContainers")
+
+  - name: SuspiciousPodmanContainers
+    description: Suspicious Podman container configurations.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.PodmanReview(source="SuspiciousPodmanContainers")
+
+  - name: KubernetesConfigLines
+    description: Kubernetes configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.KubernetesReview(source="KubernetesConfigLines")
+
+  - name: SuspiciousKubernetesConfig
+    description: Suspicious Kubernetes configuration indicators.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.KubernetesReview(source="SuspiciousKubernetesConfig")
+
+  - name: CRIContainers
+    description: CRI container inventory when crictl is available.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.KubernetesReview(source="CRIContainers")
+
+  - name: ContainerConfigLines
+    description: Container runtime configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.ContainerConfigReview(source="ContainerConfigLines")
+
+  - name: SuspiciousContainerConfig
+    description: Suspicious container runtime configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.ContainerConfigReview(source="SuspiciousContainerConfig")
+
+  - name: CloudAgentProcesses
+    description: Cloud agent and cloud workload processes.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.CloudWorkloadReview(source="CloudAgentProcesses")
+
+  - name: CloudConfigFileInventory
+    description: Cloud-related configuration file inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.CloudWorkloadReview(source="CloudConfigFileInventory")
+
+  - name: SuspiciousCloudConfigIndicators
+    description: Suspicious cloud config or credential indicators.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.CloudWorkloadReview(source="SuspiciousCloudConfigIndicators")
+
+  - name: MetadataAccessProcesses
+    description: Processes referencing cloud metadata service.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.ContainerCloud.CloudWorkloadReview(source="MetadataAccessProcesses")

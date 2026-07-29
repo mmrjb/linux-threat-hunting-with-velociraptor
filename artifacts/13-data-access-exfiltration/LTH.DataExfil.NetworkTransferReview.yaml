@@ -1,0 +1,40 @@
+name: LTH.DataExfil.NetworkTransferReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact correlates network connections with transfer-related processes
+  such as curl, wget, rsync, scp, sftp, rclone, cloud CLI tools, netcat, and socat.
+
+type: CLIENT
+
+sources:
+  - name: NetworkTransferConnections
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Status,
+             Laddr,
+             Lport,
+             Raddr,
+             Rport,
+             Pid,
+             ProcInfo.Name AS ProcessName,
+             ProcInfo.Exe AS ProcessPath,
+             ProcInfo.Username AS Username,
+             ProcInfo.CommandLine AS CommandLine,
+             if(condition=ProcInfo.CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud|scp|sftp|rsync|nc |ncat|netcat|socat)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=ProcInfo.CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud)",
+                then="Cloud storage transfer connection",
+                else=if(condition=ProcInfo.CommandLine =~ "(?i)(scp|sftp|rsync)",
+                        then="Remote file transfer connection",
+                        else=if(condition=ProcInfo.CommandLine =~ "(?i)(nc |ncat|netcat|socat)",
+                                then="Raw network transfer or tunnel connection",
+                                else="Downloader or transfer-related network connection"))) AS Reason
+      FROM Artifact.LTH.DataExfil.NetstatEnriched()
+      WHERE Status =~ "ESTAB|LISTEN"
+        AND ProcInfo.CommandLine =~ "(?i)(curl|wget|ftp|lftp|scp|sftp|rsync|rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud|nc |ncat|netcat|socat|ssh\\s+-R|ssh\\s+-L)"

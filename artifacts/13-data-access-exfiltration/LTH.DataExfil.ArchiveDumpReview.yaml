@@ -1,0 +1,74 @@
+name: LTH.DataExfil.ArchiveDumpReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact identifies archive, backup, database dump, compressed,
+  encrypted, and staging files in user, web, temporary, and application paths.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+parameters:
+  - name: SearchCommand
+    default: |
+      for d in /tmp /var/tmp /dev/shm /home /root /var/www /srv/www /opt; do
+        [ -e "$d" ] || continue
+        find "$d" -xdev -maxdepth 10 -type f -size +100k \
+          \( -iname '*.zip' -o -iname '*.tar' -o -iname '*.tar.gz' -o -iname '*.tgz' \
+          -o -iname '*.7z' -o -iname '*.rar' -o -iname '*.gz' -o -iname '*.xz' \
+          -o -iname '*.sql' -o -iname '*.dump' -o -iname '*.bak' -o -iname '*.backup' \
+          -o -iname '*.db' -o -iname '*.sqlite' -o -iname '*.sqlite3' -o -iname '*.enc' \
+          -o -iname '*.gpg' -o -iname '*.pgp' \) \
+          -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null
+      done || true
+    description: find command used to identify archive, backup, dump, and staging files.
+
+sources:
+  - name: ArchiveDumpFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", SearchCommand])
+
+      LET Files <=
+        SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+               split(string=Line, sep_string="\t")[1] AS OctalMode,
+               split(string=Line, sep_string="\t")[2] AS Owner,
+               split(string=Line, sep_string="\t")[3] AS Group,
+               split(string=Line, sep_string="\t")[4] AS Size,
+               split(string=Line, sep_string="\t")[5] AS MTime
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT OSPath,
+             OctalMode,
+             Owner,
+             Group,
+             Size,
+             MTime,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="HIGH",
+                else=if(condition=OSPath =~ "(?i)(\\.sql$|\\.dump$|\\.db$|\\.sqlite|\\.enc$|\\.gpg$|\\.pgp$)",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=OSPath =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="Archive or dump staged in temporary path",
+                else=if(condition=OSPath =~ "(?i)(\\.sql$|\\.dump$|\\.db$|\\.sqlite)",
+                        then="Database dump or database file found",
+                        else=if(condition=OSPath =~ "(?i)(\\.enc$|\\.gpg$|\\.pgp$)",
+                                then="Encrypted archive or protected staging file",
+                                else="Archive, backup, or dump file found"))) AS Reason
+      FROM Files

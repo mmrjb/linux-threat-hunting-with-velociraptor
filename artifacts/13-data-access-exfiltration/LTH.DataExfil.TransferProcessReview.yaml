@@ -1,0 +1,48 @@
+name: LTH.DataExfil.TransferProcessReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact identifies Linux processes related to data staging,
+  compression, transfer, cloud object storage, tunneling, and possible
+  exfiltration activity.
+
+type: CLIENT
+
+sources:
+  - name: TransferProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             if(condition=Deleted,
+                then="HIGH",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="HIGH",
+                        else=if(condition=CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud|scp|sftp|rsync|nc |ncat|netcat|socat)",
+                                then="HIGH",
+                                else="MEDIUM"))) AS Severity,
+             if(condition=Deleted,
+                then="Deleted transfer-related executable",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="Transfer-related process from writable path",
+                        else=if(condition=CommandLine =~ "(?i)(rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud)",
+                                then="Cloud storage or object storage transfer process",
+                                else=if(condition=CommandLine =~ "(?i)(scp|sftp|rsync)",
+                                        then="Remote file transfer process",
+                                        else=if(condition=CommandLine =~ "(?i)(nc |ncat|netcat|socat)",
+                                                then="Raw network transfer or tunneling process",
+                                                else="Compression, staging, or downloader process"))))) AS Reason
+      FROM Artifact.LTH.DataExfil.Pslist()
+      WHERE Deleted
+         OR Exe =~ "^/(tmp|var/tmp|dev/shm|home)/"
+         OR CommandLine =~ "(?i)(tar\\s|gzip|bzip2|xz|zip|7z|rar|openssl\\s+enc|gpg\\s|base64\\s+-d|base64\\s+-w|scp|sftp|rsync|rclone|aws\\s+s3|s3cmd|gsutil|az\\s+storage|gcloud|curl\\s|wget\\s|ftp\\s|lftp\\s|nc |ncat|netcat|socat|ssh\\s+-R|ssh\\s+-L)"

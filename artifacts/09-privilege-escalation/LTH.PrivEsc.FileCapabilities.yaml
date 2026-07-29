@@ -1,0 +1,51 @@
+name: LTH.PrivEsc.FileCapabilities
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact collects Linux file capabilities using getcap when available.
+  Dangerous capabilities such as cap_setuid, cap_setgid, cap_dac_read_search,
+  and cap_dac_override may indicate privilege escalation opportunities.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: FileCapabilities
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT "getcap" AS Tool,
+             Stdout,
+             Stderr,
+             ReturnCode,
+             if(condition=Stdout =~ "(?i)(cap_setuid|cap_setgid|cap_dac_read_search|cap_dac_override|cap_sys_admin|cap_chown)",
+                then="HIGH",
+                else=if(condition=Stdout,
+                        then="MEDIUM",
+                        else="INFO")) AS Severity,
+             if(condition=Stdout =~ "(?i)(cap_setuid|cap_setgid|cap_dac_read_search|cap_dac_override|cap_sys_admin|cap_chown)",
+                then="Dangerous Linux file capability detected",
+                else=if(condition=Stdout,
+                        then="Linux file capabilities detected",
+                        else="No file capabilities found or getcap unavailable")) AS Reason
+      FROM execve(argv=["/bin/sh", "-c", "command -v getcap >/dev/null 2>&1 && getcap -r /bin /sbin /usr/bin /usr/sbin /usr/local/bin /opt 2>/dev/null || true"])
+
+  - name: SuspiciousFileCapabilities
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT "getcap" AS Tool,
+             Stdout,
+             Stderr,
+             ReturnCode,
+             "HIGH" AS Severity,
+             "Dangerous Linux file capability detected" AS Reason
+      FROM execve(argv=["/bin/sh", "-c", "command -v getcap >/dev/null 2>&1 && getcap -r /bin /sbin /usr/bin /usr/sbin /usr/local/bin /opt 2>/dev/null | egrep -i 'cap_setuid|cap_setgid|cap_dac_read_search|cap_dac_override|cap_sys_admin|cap_chown' || true"])
+      WHERE Stdout

@@ -1,0 +1,97 @@
+name: LTH.ContainerCloud.KubernetesReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews Kubernetes-related configuration files and CRI
+  container output when available. It highlights privileged pods, host namespace
+  usage, hostPath mounts, root containers, and sensitive mounts.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: KubernetesConfigLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/kubernetes /var/lib/kubelet /etc/cni/net.d; do [ -e \"$d\" ] && find \"$d\" -maxdepth 6 -type f \\( -name '*.yaml' -o -name '*.yml' -o -name '*.conf' -o -name '*.json' \\) -print 2>/dev/null; done | while IFS= read -r f; do awk '{print FILENAME \"\t\" NR \"\t\" $0}' \"$f\" 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Path,
+             split(string=Line, sep_string="\t")[1] AS LineNumber,
+             split(string=Line, sep_string="\t")[2] AS ConfigLine
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousKubernetesConfig
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/kubernetes /var/lib/kubelet /etc/cni/net.d; do [ -e \"$d\" ] && find \"$d\" -maxdepth 6 -type f \\( -name '*.yaml' -o -name '*.yml' -o -name '*.conf' -o -name '*.json' \\) -print 2>/dev/null; done | while IFS= read -r f; do awk '{print FILENAME \"\t\" NR \"\t\" $0}' \"$f\" 2>/dev/null; done || true"])
+
+      LET Lines <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Path,
+               split(string=Line, sep_string="\t")[1] AS LineNumber,
+               split(string=Line, sep_string="\t")[2] AS ConfigLine
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Path,
+             LineNumber,
+             ConfigLine,
+             if(condition=ConfigLine =~ "(?i)(privileged:\\s*true|hostNetwork:\\s*true|hostPID:\\s*true|hostIPC:\\s*true|runAsUser:\\s*0|/var/run/docker.sock|hostPath:)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=ConfigLine =~ "(?i)privileged:\\s*true",
+                then="Privileged Kubernetes workload configuration",
+                else=if(condition=ConfigLine =~ "(?i)(hostNetwork:\\s*true|hostPID:\\s*true|hostIPC:\\s*true)",
+                        then="Kubernetes workload uses host namespace",
+                        else=if(condition=ConfigLine =~ "(?i)(hostPath:|/var/run/docker.sock)",
+                                then="Kubernetes workload has sensitive host mount",
+                                else="Suspicious Kubernetes configuration line"))) AS Reason
+      FROM Lines
+      WHERE ConfigLine =~ "(?i)(privileged:\\s*true|hostNetwork:\\s*true|hostPID:\\s*true|hostIPC:\\s*true|allowPrivilegeEscalation:\\s*true|runAsUser:\\s*0|hostPath:|/var/run/docker.sock|/var/lib/kubelet|mountPath:\\s*/host|curl|wget|/dev/tcp|base64 -d)"
+
+  - name: CRIContainers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v crictl >/dev/null 2>&1; then crictl ps -a 2>/dev/null | tail -n +2; fi || true"])
+
+      SELECT Line AS RawLine,
+             "INFO" AS Severity,
+             "CRI container inventory line" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

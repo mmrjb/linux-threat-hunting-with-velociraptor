@@ -1,0 +1,96 @@
+name: LTH.PrivEsc.SudoersReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact reviews sudoers configuration files and extracts active sudo
+  rules that may indicate privilege escalation risk, such as NOPASSWD,
+  broad ALL permissions, risky command delegation, or writable path references.
+
+type: CLIENT
+
+required_permissions:
+  - FILESYSTEM_READ
+
+parameters:
+  - name: SudoersGlob
+    default: /etc/sudoers,/etc/sudoers.d/*
+    description: Comma-separated sudoers files to review.
+
+sources:
+  - name: SudoersRules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET SudoersFiles <=
+        SELECT OSPath AS SudoersFile
+        FROM glob(globs=split(string=SudoersGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=SudoersFiles,
+        query={
+          SELECT SudoersFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)NOPASSWD", then="Yes", else="No") AS HasNOPASSWD,
+                 if(condition=Line =~ "\\bALL\\b", then="Yes", else="No") AS HasALL,
+                 if(condition=Line =~ "^\\s*%", then="GroupRule", else="UserRule") AS RuleType,
+                 if(condition=Line =~ "(?i)(/bin/bash|/bin/sh|python|perl|ruby|vi|vim|nano|less|more|find|tar|zip|systemctl|service|chmod|chown|cp|mv|mount|docker|lxc|lxd)",
+                    then="Yes",
+                    else="No") AS HasRiskyCommand,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="Yes",
+                    else="No") AS ReferencesWritablePath,
+                 if(condition=Line =~ "(?i)NOPASSWD",
+                    then="HIGH",
+                    else=if(condition=Line =~ "\\bALL\\b",
+                            then="MEDIUM",
+                            else="INFO")) AS Severity,
+                 if(condition=Line =~ "(?i)NOPASSWD",
+                    then="NOPASSWD sudo rule",
+                    else=if(condition=Line =~ "\\bALL\\b",
+                            then="Broad sudo permission",
+                            else=if(condition=Line =~ "(?i)(/bin/bash|/bin/sh|python|perl|ruby|vi|vim|nano|less|more|find|tar|zip|systemctl|service|chmod|chown|cp|mv|mount|docker|lxc|lxd)",
+                                    then="Risky command allowed by sudo",
+                                    else="Sudoers rule requires review"))) AS Reason
+          FROM parse_lines(filename=SudoersFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+        }
+      )
+
+  - name: RiskySudoersRules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET SudoersFiles <=
+        SELECT OSPath AS SudoersFile
+        FROM glob(globs=split(string=SudoersGlob, sep_string=","))
+        WHERE NOT IsDir
+
+      SELECT *
+      FROM foreach(
+        row=SudoersFiles,
+        query={
+          SELECT SudoersFile AS Path,
+                 Line,
+                 if(condition=Line =~ "(?i)NOPASSWD", then="Yes", else="No") AS HasNOPASSWD,
+                 if(condition=Line =~ "\\bALL\\b", then="Yes", else="No") AS HasALL,
+                 if(condition=Line =~ "^\\s*%", then="GroupRule", else="UserRule") AS RuleType,
+                 if(condition=Line =~ "(?i)(/bin/bash|/bin/sh|python|perl|ruby|vi|vim|nano|less|more|find|tar|zip|systemctl|service|chmod|chown|cp|mv|mount|docker|lxc|lxd)",
+                    then="Yes",
+                    else="No") AS HasRiskyCommand,
+                 if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                    then="Yes",
+                    else="No") AS ReferencesWritablePath,
+                 "HIGH" AS Severity,
+                 "Risky sudoers rule" AS Reason
+          FROM parse_lines(filename=SudoersFile)
+          WHERE NOT Line =~ "^\\s*(#|$)"
+            AND Line =~ "(?i)(NOPASSWD|\\bALL\\b|/bin/bash|/bin/sh|python|perl|ruby|vi|vim|nano|less|more|find|tar|zip|systemctl|service|chmod|chown|cp|mv|mount|docker|lxc|lxd|/tmp/|/var/tmp/|/dev/shm/|/home/)"
+        }
+      )

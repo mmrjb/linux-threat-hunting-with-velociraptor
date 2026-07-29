@@ -1,0 +1,120 @@
+name: LTH.RootkitKernel.KernelModuleReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact reviews loaded Linux kernel modules and kernel module files.
+  It highlights suspicious module names and kernel module files found in
+  writable or unusual paths.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: KernelModules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "awk '{print $1\"\\t\"$2\"\\t\"$3\"\\t\"$4\"\\t\"$5\"\\t\"$6}' /proc/modules 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Module,
+             split(string=Line, sep_string="\t")[1] AS Size,
+             split(string=Line, sep_string="\t")[2] AS UsedByCount,
+             split(string=Line, sep_string="\t")[3] AS Dependencies,
+             split(string=Line, sep_string="\t")[4] AS State,
+             split(string=Line, sep_string="\t")[5] AS Address
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousKernelModules
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "awk '{print $1\"\\t\"$2\"\\t\"$3\"\\t\"$4\"\\t\"$5\"\\t\"$6}' /proc/modules 2>/dev/null | egrep -i 'diamorphine|reptile|adore|suterusu|rootkit|syscall|sys_call|hook|hide|stealth|lkm' || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Module,
+             split(string=Line, sep_string="\t")[1] AS Size,
+             split(string=Line, sep_string="\t")[2] AS UsedByCount,
+             split(string=Line, sep_string="\t")[3] AS Dependencies,
+             split(string=Line, sep_string="\t")[4] AS State,
+             split(string=Line, sep_string="\t")[5] AS Address,
+             "HIGH" AS Severity,
+             "Suspicious kernel module name" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: KernelModuleFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "KVER=$(uname -r); find /lib/modules/$KVER /usr/lib/modules/$KVER /tmp /var/tmp /dev/shm /opt /usr/local /home -maxdepth 10 -type f \\( -name '*.ko' -o -name '*.ko.*' \\) -printf '%p\\t%m\\t%u\\t%g\\t%s\\t%TY-%Tm-%Td %TH:%TM:%TS\\n' 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousKernelModuleFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "KVER=$(uname -r); find /lib/modules/$KVER /usr/lib/modules/$KVER /tmp /var/tmp /dev/shm /opt /usr/local /home -maxdepth 10 -type f \\( -name '*.ko' -o -name '*.ko.*' \\) -printf '%p\\t%m\\t%u\\t%g\\t%s\\t%TY-%Tm-%Td %TH:%TM:%TS\\n' 2>/dev/null | egrep -i '(^/tmp|^/var/tmp|^/dev/shm|^/home|diamorphine|reptile|adore|suterusu|rootkit|hide|stealth)' || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             "HIGH" AS Severity,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                then="Kernel module file in writable or user-controlled path",
+                else="Suspicious kernel module filename") AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

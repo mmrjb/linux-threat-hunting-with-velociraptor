@@ -1,0 +1,64 @@
+name: LTH.DataExfil.CloudCliConfigReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact reviews cloud CLI configuration locations for AWS, GCP, Azure,
+  rclone, and s3cmd indicators. It avoids returning secret values directly.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: CloudCliConfigInventory
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /root/.aws /home/*/.aws /root/.config/gcloud /home/*/.config/gcloud /root/.azure /home/*/.azure /root/.config/rclone /home/*/.config/rclone /root/.s3cfg /home/*/.s3cfg; do [ -e \"$d\" ] && find $d -maxdepth 5 -type f -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             "MEDIUM" AS Severity,
+             "Cloud CLI or object storage configuration file" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousCloudCliIndicators
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /root/.aws /home/*/.aws /root/.config/gcloud /home/*/.config/gcloud /root/.azure /home/*/.azure /root/.config/rclone /home/*/.config/rclone /root/.s3cfg /home/*/.s3cfg; do [ -e \"$d\" ] && find $d -maxdepth 5 -type f -size -5M -print 2>/dev/null; done | while IFS= read -r f; do awk 'BEGIN{IGNORECASE=1} /aws_access_key_id|aws_secret_access_key|access_key|secret_key|client_secret|refresh_token|token|rclone|s3/ {print FILENAME \"\t\" NR \"\tCloud credential or object storage indicator\"}' \"$f\" 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Path,
+             split(string=Line, sep_string="\t")[1] AS LineNumber,
+             split(string=Line, sep_string="\t")[2] AS Indicator,
+             "HIGH" AS Severity,
+             "Cloud credential or object storage indicator found" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

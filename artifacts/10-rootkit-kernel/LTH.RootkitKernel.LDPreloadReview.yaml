@@ -1,0 +1,76 @@
+name: LTH.RootkitKernel.LDPreloadReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact reviews LD_PRELOAD related configuration files and suspicious
+  shared libraries that may indicate userland rootkit behavior or library
+  hijacking.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: LDPreloadLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for f in /etc/ld.so.preload /etc/ld.so.conf /etc/ld.so.conf.d/*; do [ -f \"$f\" ] && sed \"s|^|$f\\t|\" \"$f\"; done 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Path,
+             split(string=Line, sep_string="\t")[1] AS Line
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousLDPreloadLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for f in /etc/ld.so.preload /etc/ld.so.conf /etc/ld.so.conf.d/*; do [ -f \"$f\" ] && sed \"s|^|$f\\t|\" \"$f\"; done 2>/dev/null || true"])
+
+      LET Lines <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Path,
+               split(string=Line, sep_string="\t")[1] AS Line
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Path,
+             Line,
+             if(condition=Path =~ "/etc/ld.so.preload" AND NOT Line =~ "^\\s*(#|$)",
+                then="HIGH",
+                else=if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=Path =~ "/etc/ld.so.preload" AND NOT Line =~ "^\\s*(#|$)",
+                then="Active LD_PRELOAD configuration found",
+                else=if(condition=Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/)",
+                        then="Library path references writable or user-controlled path",
+                        else="Suspicious dynamic linker configuration")) AS Reason
+      FROM Lines
+      WHERE NOT Line =~ "^\\s*(#|$)"
+        AND (
+             Path =~ "/etc/ld.so.preload"
+             OR Line =~ "(?i)(/tmp/|/var/tmp/|/dev/shm/|/home/|\\.so)"
+        )

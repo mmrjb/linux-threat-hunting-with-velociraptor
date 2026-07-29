@@ -1,0 +1,92 @@
+name: LTH.ContainerCloud.PodmanReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews Podman containers and images when Podman is available.
+  It highlights privileged containers, host namespace usage, and sensitive mounts.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: PodmanContainers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v podman >/dev/null 2>&1; then ids=$(podman ps -aq 2>/dev/null); if [ -n \"$ids\" ]; then podman inspect --format '{{.Id}}\t{{.Name}}\t{{.ImageName}}\t{{.State.Status}}\t{{.Config.User}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.PidMode}}\t{{.HostConfig.NetworkMode}}\t{{json .HostConfig.Binds}}\t{{json .Mounts}}' $ids 2>/dev/null; fi; fi || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS ContainerId,
+             split(string=Line, sep_string="\t")[1] AS Name,
+             split(string=Line, sep_string="\t")[2] AS Image,
+             split(string=Line, sep_string="\t")[3] AS Status,
+             split(string=Line, sep_string="\t")[4] AS ContainerUser,
+             split(string=Line, sep_string="\t")[5] AS Privileged,
+             split(string=Line, sep_string="\t")[6] AS PidMode,
+             split(string=Line, sep_string="\t")[7] AS NetworkMode,
+             split(string=Line, sep_string="\t")[8] AS Binds,
+             split(string=Line, sep_string="\t")[9] AS Mounts,
+             "INFO" AS Severity,
+             "Podman container inventory" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousPodmanContainers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v podman >/dev/null 2>&1; then ids=$(podman ps -aq 2>/dev/null); if [ -n \"$ids\" ]; then podman inspect --format '{{.Id}}\t{{.Name}}\t{{.ImageName}}\t{{.State.Status}}\t{{.Config.User}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.PidMode}}\t{{.HostConfig.NetworkMode}}\t{{json .HostConfig.Binds}}\t{{json .Mounts}}' $ids 2>/dev/null; fi; fi || true"])
+
+      LET Containers <=
+        SELECT split(string=Line, sep_string="\t")[0] AS ContainerId,
+               split(string=Line, sep_string="\t")[1] AS Name,
+               split(string=Line, sep_string="\t")[2] AS Image,
+               split(string=Line, sep_string="\t")[3] AS Status,
+               split(string=Line, sep_string="\t")[4] AS ContainerUser,
+               split(string=Line, sep_string="\t")[5] AS Privileged,
+               split(string=Line, sep_string="\t")[6] AS PidMode,
+               split(string=Line, sep_string="\t")[7] AS NetworkMode,
+               split(string=Line, sep_string="\t")[8] AS Binds,
+               split(string=Line, sep_string="\t")[9] AS Mounts
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT ContainerId,
+             Name,
+             Image,
+             Status,
+             ContainerUser,
+             Privileged,
+             PidMode,
+             NetworkMode,
+             Binds,
+             Mounts,
+             "HIGH" AS Severity,
+             "Suspicious Podman container configuration" AS Reason
+      FROM Containers
+      WHERE Privileged = "true"
+         OR PidMode =~ "host"
+         OR NetworkMode =~ "host"
+         OR Binds =~ "(docker.sock|podman.sock|/etc|/root|/var/lib/containers|/:)"

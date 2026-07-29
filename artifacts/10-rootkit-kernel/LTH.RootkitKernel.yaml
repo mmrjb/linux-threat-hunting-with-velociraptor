@@ -1,0 +1,176 @@
+name: LTH.RootkitKernel
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This wrapper artifact collects rootkit and kernel-level indicators,
+  including process inventory, loaded kernel modules, suspicious module files,
+  kernel logs, LD_PRELOAD configuration, /proc anomalies, kernel security
+  settings, hidden device files, and scanner availability.
+
+type: CLIENT
+
+implied_permissions:
+  - EXECVE
+  - FILESYSTEM_READ
+
+sources:
+  - name: Pslist
+    description: Process inventory.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.Pslist()
+
+  - name: KernelModules
+    description: Loaded kernel modules.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelModuleReview(source="KernelModules")
+
+  - name: SuspiciousKernelModules
+    description: Suspicious loaded kernel modules.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelModuleReview(source="SuspiciousKernelModules")
+
+  - name: KernelModuleFiles
+    description: Kernel module files on disk.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelModuleReview(source="KernelModuleFiles")
+
+  - name: SuspiciousKernelModuleFiles
+    description: Suspicious kernel module files.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelModuleReview(source="SuspiciousKernelModuleFiles")
+
+  - name: KernelMessages
+    description: Kernel messages from logs and dmesg.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelLogReview(source="KernelMessages")
+
+  - name: SuspiciousKernelMessages
+    description: Suspicious kernel messages.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelLogReview(source="SuspiciousKernelMessages")
+
+  - name: LDPreloadLines
+    description: LD_PRELOAD and dynamic linker configuration lines.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.LDPreloadReview(source="LDPreloadLines")
+
+  - name: SuspiciousLDPreloadLines
+    description: Suspicious LD_PRELOAD or dynamic linker configuration.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.LDPreloadReview(source="SuspiciousLDPreloadLines")
+
+  - name: ProcProcessList
+    description: Process list from /proc.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.ProcAnomalyReview(source="ProcProcessList")
+
+  - name: DeletedProcExecutables
+    description: Processes with deleted executables.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.ProcAnomalyReview(source="DeletedProcExecutables")
+
+  - name: SuspiciousProcMaps
+    description: Suspicious process memory mappings.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.ProcAnomalyReview(source="SuspiciousProcMaps")
+
+  - name: KernelSecuritySettings
+    description: Security-relevant kernel sysctl settings.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelSecuritySettings(source="KernelSecuritySettings")
+
+  - name: WeakKernelSecuritySettings
+    description: Weak kernel security settings.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.KernelSecuritySettings(source="WeakKernelSecuritySettings")
+
+  - name: SuspiciousDeviceHiddenFiles
+    description: Hidden or suspicious files in /dev, temp, and writable paths.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.DeviceHiddenReview(source="SuspiciousDeviceHiddenFiles")
+
+  - name: ScannerAvailability
+    description: Rootkit scanner availability.
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT *
+      FROM Artifact.LTH.RootkitKernel.RootkitScannerAvailability(source="ScannerAvailability")

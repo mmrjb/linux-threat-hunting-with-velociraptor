@@ -1,0 +1,65 @@
+name: LTH.ContainerCloud.ContainerProcessReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews running processes related to Docker, Podman, containerd,
+  CRI-O, Kubernetes, and cloud workload agents.
+
+type: CLIENT
+
+sources:
+  - name: ContainerRuntimeProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             "INFO" AS Severity,
+             "Container or cloud workload related process" AS Reason
+      FROM Artifact.LTH.ContainerCloud.Pslist()
+      WHERE Name =~ "(?i)(dockerd|docker|containerd|containerd-shim|runc|podman|crio|crictl|kubelet|kube-proxy|kubectl|nerdctl|amazon-ssm-agent|amazon-cloudwatch-agent|waagent|google-guest-agent|cloud-init|osconfig_agent)"
+         OR CommandLine =~ "(?i)(dockerd|containerd|containerd-shim|runc|podman|crio|kubelet|kube-proxy|amazon-ssm-agent|amazon-cloudwatch-agent|waagent|google-guest-agent|cloud-init|metadata\\.google|169\\.254\\.169\\.254)"
+
+  - name: SuspiciousContainerProcesses
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Pid,
+             Ppid,
+             Name,
+             Username,
+             Exe,
+             CommandLine,
+             CreatedTime,
+             Deleted,
+             if(condition=Deleted,
+                then="HIGH",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             if(condition=Deleted,
+                then="Deleted container/cloud-related executable",
+                else=if(condition=Exe =~ "^/(tmp|var/tmp|dev/shm|home)/",
+                        then="Container/cloud process from writable path",
+                        else="Suspicious container or cloud workload command line")) AS Reason
+      FROM Artifact.LTH.ContainerCloud.Pslist()
+      WHERE (
+              Name =~ "(?i)(docker|podman|containerd|runc|crio|kubelet|kubectl|crictl|nerdctl|cloud-init|amazon-ssm-agent|waagent|google-guest-agent)"
+              OR CommandLine =~ "(?i)(docker|podman|containerd|runc|crio|kubelet|kubectl|crictl|nerdctl|169\\.254\\.169\\.254|metadata\\.google)"
+            )
+        AND (
+              Deleted
+              OR Exe =~ "^/(tmp|var/tmp|dev/shm|home)/"
+              OR CommandLine =~ "(?i)(--privileged|--pid=host|--net=host|--network=host|/var/run/docker.sock|hostPath|curl|wget|bash -i|/dev/tcp|base64 -d)"
+            )

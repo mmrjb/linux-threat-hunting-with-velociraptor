@@ -1,0 +1,69 @@
+name: LTH.ContainerCloud.ContainerConfigReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews common container runtime configuration files and
+  highlights insecure registries, disabled TLS verification, sensitive mounts,
+  and other risky container runtime settings.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: ContainerConfigLines
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/docker /etc/containerd /etc/containers /etc/crio /etc/cni/net.d; do [ -e \"$d\" ] && find \"$d\" -maxdepth 5 -type f -print 2>/dev/null; done | while IFS= read -r f; do awk '{print FILENAME \"\t\" NR \"\t\" $0}' \"$f\" 2>/dev/null; done || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Path,
+             split(string=Line, sep_string="\t")[1] AS LineNumber,
+             split(string=Line, sep_string="\t")[2] AS ConfigLine
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousContainerConfig
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for d in /etc/docker /etc/containerd /etc/containers /etc/crio /etc/cni/net.d; do [ -e \"$d\" ] && find \"$d\" -maxdepth 5 -type f -print 2>/dev/null; done | while IFS= read -r f; do awk '{print FILENAME \"\t\" NR \"\t\" $0}' \"$f\" 2>/dev/null; done || true"])
+
+      LET Lines <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Path,
+               split(string=Line, sep_string="\t")[1] AS LineNumber,
+               split(string=Line, sep_string="\t")[2] AS ConfigLine
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Path,
+             LineNumber,
+             ConfigLine,
+             if(condition=ConfigLine =~ "(?i)(insecure-registries|tlsverify\\s*=\\s*false|skip_verify|insecure_skip_verify|privileged|/var/run/docker.sock|hostNetwork|hostPID)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             "Suspicious or risky container runtime configuration" AS Reason
+      FROM Lines
+      WHERE ConfigLine =~ "(?i)(insecure-registries|tlsverify\\s*=\\s*false|skip_verify|insecure_skip_verify|privileged|/var/run/docker.sock|hostNetwork|hostPID|registry-mirrors.*http://|allow-nondistributable-artifacts|root\\s*=)"

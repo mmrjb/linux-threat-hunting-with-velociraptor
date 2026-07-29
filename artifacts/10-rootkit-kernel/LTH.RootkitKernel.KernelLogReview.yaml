@@ -1,0 +1,70 @@
+name: LTH.RootkitKernel.KernelLogReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact reviews kernel and security-related messages from dmesg and
+  common Linux log files. It highlights kernel taint, unsigned modules,
+  suspicious module loading, denied events, and kernel-level warnings.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: KernelMessages
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for f in /var/log/kern.log /var/log/kern.log.1 /var/log/messages /var/log/messages.1 /var/log/syslog /var/log/syslog.1; do [ -r \"$f\" ] && sed \"s|^|$f\\t|\" \"$f\"; done; dmesg -T 2>/dev/null | tail -n 1000 | sed 's|^|dmesg\\t|' || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Source,
+             split(string=Line, sep_string="\t")[1] AS Line
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousKernelMessages
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for f in /var/log/kern.log /var/log/kern.log.1 /var/log/messages /var/log/messages.1 /var/log/syslog /var/log/syslog.1; do [ -r \"$f\" ] && sed \"s|^|$f\\t|\" \"$f\"; done; dmesg -T 2>/dev/null | tail -n 1000 | sed 's|^|dmesg\\t|' || true"])
+
+      LET Lines <=
+        SELECT split(string=Line, sep_string="\t")[0] AS Source,
+               split(string=Line, sep_string="\t")[1] AS Line
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT Source,
+             Line,
+             if(condition=Line =~ "(?i)(tainted|module verification failed|unsigned|out-of-tree|sys_call_table|rootkit|hidden|hook|kprobe|bpf|lockdown|AVC|DENIED|denied)",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=Line =~ "(?i)(tainted|module verification failed|unsigned|out-of-tree)",
+                then="Kernel module trust warning",
+                else=if(condition=Line =~ "(?i)(sys_call_table|rootkit|hidden|hook|kprobe|bpf)",
+                        then="Possible kernel-level tampering indicator",
+                        else="Kernel security warning")) AS Reason
+      FROM Lines
+      WHERE Line =~ "(?i)(tainted|module verification failed|unsigned|out-of-tree|sys_call_table|rootkit|hidden|hook|kprobe|bpf|lockdown|apparmor|SELinux|AVC|DENIED|denied|segfault|Oops|BUG)"

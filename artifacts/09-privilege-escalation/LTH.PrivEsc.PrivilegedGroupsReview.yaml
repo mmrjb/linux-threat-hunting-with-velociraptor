@@ -1,0 +1,47 @@
+name: LTH.PrivEsc.PrivilegedGroupsReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.9 Privilege Escalation Indicators
+
+  This artifact reviews privileged and sensitive Linux group memberships
+  that may provide administrative or privilege escalation opportunities.
+
+type: CLIENT
+
+sources:
+  - name: PrivilegedGroups
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT Group,
+             GID,
+             Members,
+             if(condition=Group =~ "^(sudo|wheel|root)$",
+                then="HIGH",
+                else=if(condition=Group =~ "^(docker|lxd|disk|shadow)$",
+                        then="HIGH",
+                        else="MEDIUM")) AS Severity,
+             "Sensitive or privileged group membership" AS Reason
+      FROM Artifact.LTH.PrivEsc.Groups()
+      WHERE Group =~ "^(sudo|wheel|root|admin|docker|lxd|adm|disk|shadow)$"
+        AND Members
+
+  - name: UID0Users
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      SELECT User,
+             Description,
+             Uid,
+             Gid,
+             Homedir,
+             Shell,
+             "HIGH" AS Severity,
+             "Non-root user with UID 0" AS Reason
+      FROM Artifact.LTH.PrivEsc.Users()
+      WHERE Uid = "0"
+        AND User != "root"

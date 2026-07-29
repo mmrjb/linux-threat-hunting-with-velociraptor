@@ -1,0 +1,45 @@
+name: LTH.RootkitKernel.DeviceHiddenReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact searches for suspicious hidden files and rootkit-like names
+  in device, temporary, and writable locations.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: SuspiciousDeviceHiddenFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "find /dev /tmp /var/tmp /dev/shm /opt /usr/local /home -xdev -maxdepth 6 \\( -name '.*' -o -iname '*rootkit*' -o -iname '*diamorphine*' -o -iname '*reptile*' -o -iname '*adore*' -o -iname '*hide*' -o -iname '*stealth*' \\) -printf '%p\\t%m\\t%u\\t%g\\t%s\\t%TY-%Tm-%Td %TH:%TM:%TS\\t%y\\n' 2>/dev/null || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             split(string=Line, sep_string="\t")[6] AS FileType,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/dev/",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/dev/",
+                then="Hidden or suspicious object under /dev",
+                else="Hidden or rootkit-like object in monitored path") AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

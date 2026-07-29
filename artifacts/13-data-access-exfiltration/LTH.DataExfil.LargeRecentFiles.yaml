@@ -1,0 +1,47 @@
+name: LTH.DataExfil.LargeRecentFiles
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.13 Data Access and Exfiltration
+
+  This artifact identifies large recently modified files in temporary, user,
+  web, and application paths. Large recent files may indicate collection,
+  staging, compression, or preparation for exfiltration.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: LargeRecentFiles
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=[
+          "/bin/sh",
+          "-c",
+          "for d in /tmp /var/tmp /dev/shm /home /root /var/www /srv/www /opt; do [ -e \"$d\" ] || continue; find \"$d\" -xdev -maxdepth 10 -type f -mtime -7 -size +10M -printf '%p\t%m\t%u\t%g\t%s\t%TY-%Tm-%Td %TH:%TM:%TS\n' 2>/dev/null; done || true"
+        ])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS OSPath,
+             split(string=Line, sep_string="\t")[1] AS OctalMode,
+             split(string=Line, sep_string="\t")[2] AS Owner,
+             split(string=Line, sep_string="\t")[3] AS Group,
+             split(string=Line, sep_string="\t")[4] AS Size,
+             split(string=Line, sep_string="\t")[5] AS MTime,
+             if(condition=split(string=Line, sep_string="\t")[0] =~ "^/(tmp|var/tmp|dev/shm)/",
+                then="HIGH",
+                else="MEDIUM") AS Severity,
+             "Large recently modified file in monitored path" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

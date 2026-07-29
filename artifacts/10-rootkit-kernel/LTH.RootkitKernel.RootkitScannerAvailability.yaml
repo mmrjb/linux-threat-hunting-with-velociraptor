@@ -1,0 +1,38 @@
+name: LTH.RootkitKernel.RootkitScannerAvailability
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.10 Rootkit and Kernel-Level Checks
+
+  This artifact checks whether common Linux rootkit scanning tools such as
+  rkhunter or chkrootkit are installed. It does not run full scans by default.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: ScannerAvailability
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "for t in rkhunter chkrootkit; do if command -v $t >/dev/null 2>&1; then printf '%s\\t%s\\n' \"$t\" \"Installed\"; else printf '%s\\t%s\\n' \"$t\" \"NotInstalled\"; fi; done"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Tool,
+             split(string=Line, sep_string="\t")[1] AS Status,
+             if(condition=split(string=Line, sep_string="\t")[1] = "Installed",
+                then="INFO",
+                else="INFO") AS Severity,
+             "Rootkit scanner availability check" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )

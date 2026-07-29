@@ -1,0 +1,125 @@
+name: LTH.ContainerCloud.DockerReview
+author: Rajabzadeh
+description: |
+  Linux Threat Hunting - Section 2.12 Containers and Cloud Workloads
+
+  This artifact reviews Docker containers and images when Docker is available.
+  It highlights privileged containers, host network mode, host PID mode,
+  sensitive bind mounts, and Docker socket exposure.
+
+type: CLIENT
+
+required_permissions:
+  - EXECVE
+
+sources:
+  - name: DockerContainers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v docker >/dev/null 2>&1; then ids=$(docker ps -aq 2>/dev/null); if [ -n \"$ids\" ]; then docker inspect --format '{{.Id}}\t{{.Name}}\t{{.Config.Image}}\t{{.State.Status}}\t{{.Config.User}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.PidMode}}\t{{.HostConfig.NetworkMode}}\t{{json .HostConfig.Binds}}\t{{json .Mounts}}' $ids 2>/dev/null; fi; fi || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS ContainerId,
+             split(string=Line, sep_string="\t")[1] AS Name,
+             split(string=Line, sep_string="\t")[2] AS Image,
+             split(string=Line, sep_string="\t")[3] AS Status,
+             split(string=Line, sep_string="\t")[4] AS ContainerUser,
+             split(string=Line, sep_string="\t")[5] AS Privileged,
+             split(string=Line, sep_string="\t")[6] AS PidMode,
+             split(string=Line, sep_string="\t")[7] AS NetworkMode,
+             split(string=Line, sep_string="\t")[8] AS Binds,
+             split(string=Line, sep_string="\t")[9] AS Mounts,
+             "INFO" AS Severity,
+             "Docker container inventory" AS Reason
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
+
+  - name: SuspiciousDockerContainers
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v docker >/dev/null 2>&1; then ids=$(docker ps -aq 2>/dev/null); if [ -n \"$ids\" ]; then docker inspect --format '{{.Id}}\t{{.Name}}\t{{.Config.Image}}\t{{.State.Status}}\t{{.Config.User}}\t{{.HostConfig.Privileged}}\t{{.HostConfig.PidMode}}\t{{.HostConfig.NetworkMode}}\t{{json .HostConfig.Binds}}\t{{json .Mounts}}' $ids 2>/dev/null; fi; fi || true"])
+
+      LET Containers <=
+        SELECT split(string=Line, sep_string="\t")[0] AS ContainerId,
+               split(string=Line, sep_string="\t")[1] AS Name,
+               split(string=Line, sep_string="\t")[2] AS Image,
+               split(string=Line, sep_string="\t")[3] AS Status,
+               split(string=Line, sep_string="\t")[4] AS ContainerUser,
+               split(string=Line, sep_string="\t")[5] AS Privileged,
+               split(string=Line, sep_string="\t")[6] AS PidMode,
+               split(string=Line, sep_string="\t")[7] AS NetworkMode,
+               split(string=Line, sep_string="\t")[8] AS Binds,
+               split(string=Line, sep_string="\t")[9] AS Mounts
+        FROM foreach(
+          row=Raw,
+          query={
+            SELECT Line
+            FROM parse_lines(accessor="data", filename=Stdout)
+            WHERE Line
+          }
+        )
+
+      SELECT ContainerId,
+             Name,
+             Image,
+             Status,
+             ContainerUser,
+             Privileged,
+             PidMode,
+             NetworkMode,
+             Binds,
+             Mounts,
+             "HIGH" AS Severity,
+             if(condition=Privileged = "true",
+                then="Privileged Docker container",
+                else=if(condition=PidMode =~ "host",
+                        then="Docker container uses host PID namespace",
+                        else=if(condition=NetworkMode =~ "host",
+                                then="Docker container uses host network",
+                                else=if(condition=Binds =~ "docker.sock|/etc|/root|/var/lib/docker|/:",
+                                        then="Docker container has sensitive host bind mount",
+                                        else="Suspicious Docker container configuration")))) AS Reason
+      FROM Containers
+      WHERE Privileged = "true"
+         OR PidMode =~ "host"
+         OR NetworkMode =~ "host"
+         OR Binds =~ "(docker.sock|/etc|/root|/var/lib/docker|/:)"
+
+  - name: DockerImages
+    precondition: |
+      SELECT OS
+      FROM info()
+      WHERE OS = "linux"
+    query: |
+      LET Raw <=
+        SELECT Stdout
+        FROM execve(argv=["/bin/sh", "-c", "if command -v docker >/dev/null 2>&1; then docker images --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}\t{{.Size}}' 2>/dev/null; fi || true"])
+
+      SELECT split(string=Line, sep_string="\t")[0] AS Repository,
+             split(string=Line, sep_string="\t")[1] AS Tag,
+             split(string=Line, sep_string="\t")[2] AS ImageId,
+             split(string=Line, sep_string="\t")[3] AS CreatedSince,
+             split(string=Line, sep_string="\t")[4] AS Size
+      FROM foreach(
+        row=Raw,
+        query={
+          SELECT Line
+          FROM parse_lines(accessor="data", filename=Stdout)
+          WHERE Line
+        }
+      )
