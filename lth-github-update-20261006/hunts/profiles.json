@@ -1,0 +1,171 @@
+{
+  "format": "lth-hunt-profiles-v1",
+  "profiles": [
+    {
+      "module": 1,
+      "artifact": "LTH.SystemBaseline",
+      "template": "templates/01-system-baseline.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 2,
+      "artifact": "LTH.UsersPrivileges",
+      "template": "templates/02-users-privileges.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 3,
+      "artifact": "LTH.AuthSSH",
+      "template": "templates/03-auth-ssh.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 4,
+      "artifact": "LTH.ProcessServices",
+      "template": "templates/04-process-services.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 5,
+      "artifact": "LTH.NetworkConnections",
+      "template": "templates/05-network-connections.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 6,
+      "artifact": "LTH.Persistence",
+      "template": "templates/06-persistence.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 7,
+      "artifact": "LTH.FileTimeline",
+      "template": "templates/07-file-timeline.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 8,
+      "artifact": "LTH.LogSecurityEvents",
+      "template": "templates/08-log-security-events.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 9,
+      "artifact": "LTH.PrivEsc",
+      "template": "templates/09-privilege-escalation.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 10,
+      "artifact": "LTH.RootkitKernel",
+      "template": "templates/10-rootkit-kernel.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 11,
+      "artifact": "LTH.MalwareTools",
+      "template": "templates/11-malware-tools.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 12,
+      "artifact": "LTH.ContainerCloud",
+      "template": "templates/12-container-cloud.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "timeout": "3600",
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 13,
+      "artifact": "LTH.DataExfil",
+      "template": "templates/13-data-access-exfiltration.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "max_bytes": "1073741824"
+      }
+    },
+    {
+      "module": 14,
+      "artifact": "LTH.ConfigSecrets",
+      "template": "templates/14-configuration-secrets.vql",
+      "initial_state": "PAUSED",
+      "target_label": "SET_TARGET_LABEL",
+      "duration_seconds": 86400,
+      "recorded_resource_limits": {
+        "max_bytes": "1073741824"
+      }
+    }
+  ]
+}

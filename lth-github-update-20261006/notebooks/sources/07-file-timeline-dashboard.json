@@ -1,0 +1,160 @@
+{
+  "name": "LTH - 07 - File System and Timeline Analysis Dashboard",
+  "module": 7,
+  "environment_variable_names": [],
+  "parameter_names": [
+    "ArtifactName"
+  ],
+  "cells": [
+    {
+      "order": 1,
+      "type": "markdown",
+      "input": "# LTH - 07 - File System and Timeline Analysis Dashboard\n\nThis notebook analyzes Linux filesystem and timeline data collected by:\n\n`LTH.FileTimeline`\n\nMain objectives:\n\n- Review recently modified files in sensitive paths\n- Build basic file timeline from MTime and CTime\n- Identify executable files in writable or temporary paths\n- Review anomalous files such as hidden, large, or SUID files\n- Review recent web root changes\n- Identify archive, backup, and dump files\n- Prioritize clients that need deeper investigation"
+    },
+    {
+      "order": 2,
+      "type": "markdown",
+      "input": "# Recent Sensitive Files Inventory\n\nThis section reviews recently modified files in sensitive Linux paths.\n\nRecent changes under `/etc`, `/usr/local/bin`, `/opt`, web roots, temp paths, and user home directories may indicate configuration changes, dropped tools, staging activity, or persistence preparation."
+    },
+    {
+      "order": 3,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       MTime,\n       CTime,\n       ATime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/RecentSensitiveFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 4,
+      "type": "markdown",
+      "input": "# Recent Sensitive File Count per Client"
+    },
+    {
+      "order": 5,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       count() AS RecentSensitiveFileCount\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/RecentSensitiveFiles\"\n)\nGROUP BY ClientId\nORDER BY RecentSensitiveFileCount DESC"
+    },
+    {
+      "order": 6,
+      "type": "markdown",
+      "input": "# Sensitive Timeline Events\n\nThis section creates a basic filesystem timeline using MTime and CTime events.\n\nIt helps analysts understand when sensitive files were modified or when metadata changed, which is useful for correlating with authentication, process, persistence, or network activity."
+    },
+    {
+      "order": 7,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       EventTime,\n       EventType,\n       OSPath,\n       Size,\n       Mode,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/SensitiveTimelineEvents\"\n)\nORDER BY EventTime"
+    },
+    {
+      "order": 8,
+      "type": "markdown",
+      "input": "# Files Modified Under /etc"
+    },
+    {
+      "order": 9,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       MTime,\n       CTime,\n       Severity,\n       \"Recent change under /etc\" AS Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/RecentSensitiveFiles\"\n)\nWHERE OSPath =~ \"^/etc/\"\nORDER BY ClientId"
+    },
+    {
+      "order": 10,
+      "type": "markdown",
+      "input": "# Temp Executable Files\n\nThis section identifies executable or script-like files in writable and temporary locations.\n\nFiles executed or staged under `/tmp`, `/var/tmp`, `/dev/shm`, or user home directories are commonly suspicious and should be reviewed carefully. "
+    },
+    {
+      "order": 11,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       MTime,\n       CTime,\n       ATime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/TempExecutableFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 12,
+      "type": "markdown",
+      "input": "# Web Root Changes\n\nThis section reviews recently modified files under common Linux web root directories.\n\nRecent server-side files or script changes may indicate webshells, dropped payloads, modified web applications, or attacker staging activity."
+    },
+    {
+      "order": 13,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       MTime,\n       CTime,\n       ATime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/WebRootChanges\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 14,
+      "type": "markdown",
+      "input": "# Anomalous Files Inventory\n\nThis section reviews anomalous files detected on Linux endpoints.\n\nAnomalous files include hidden files, large files, or files with SUID-related indicators and should be reviewed based on path, permissions, and server role."
+    },
+    {
+      "order": 15,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Host,\n       OSPath,\n       IsHidden,\n       IsLarge,\n       Size,\n       Mode,\n       HasSUID\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/AnomalousFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 16,
+      "type": "markdown",
+      "input": "# Hidden Files"
+    },
+    {
+      "order": 17,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Host,\n       OSPath,\n       Size,\n       Mode,\n       \"MEDIUM\" AS Severity,\n       \"Hidden file detected\" AS Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/AnomalousFiles\"\n)\nWHERE IsHidden\nORDER BY ClientId"
+    },
+    {
+      "order": 18,
+      "type": "markdown",
+      "input": "# Large Files"
+    },
+    {
+      "order": 19,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Host,\n       OSPath,\n       Size,\n       Mode,\n       \"MEDIUM\" AS Severity,\n       \"Large file detected\" AS Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/AnomalousFiles\"\n)\nWHERE IsLarge\nORDER BY ClientId"
+    },
+    {
+      "order": 20,
+      "type": "markdown",
+      "input": "# SUID-Like Anomalous Files"
+    },
+    {
+      "order": 21,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Host,\n       OSPath,\n       Size,\n       Mode,\n       \"HIGH\" AS Severity,\n       \"File with SUID indicator detected\" AS Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/AnomalousFiles\"\n)\nWHERE HasSUID\nORDER BY ClientId"
+    },
+    {
+      "order": 22,
+      "type": "markdown",
+      "input": "# Archive and Dump Files\n\nThis section identifies archive, backup, and database dump files in monitored locations.\n\nThese files may indicate staging activity, backup exposure, database dumping, or preparation for exfiltration."
+    },
+    {
+      "order": 23,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       MTime,\n       CTime,\n       ATime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/ArchiveAndDumpFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 24,
+      "type": "markdown",
+      "input": "# FileFinder Results"
+    },
+    {
+      "order": 25,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       Size,\n       Mode,\n       ATime,\n       MTime,\n       CTime,\n       Keywords\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.FileTimeline/FileFinder\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 26,
+      "type": "markdown",
+      "input": "# Final Findings Detail\n\nThis section combines suspicious filesystem and timeline indicators into one findings table.\n\nIt includes temp executable files, recent web root changes, anomalous files, recent sensitive path changes, archive/dump files, and SUID-like indicators.\n\nUse this table as the main evidence view for filesystem and timeline hunting."
+    },
+    {
+      "order": 27,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET TempExecutables <=\n  SELECT ClientId,\n         Severity,\n         \"Temp Executable File\" AS Finding,\n         OSPath AS Evidence1,\n         Mode AS Evidence2,\n         MTime AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/TempExecutableFiles\"\n  )\n\nLET WebRootChanges <=\n  SELECT ClientId,\n         Severity,\n         \"Recent Web Root Change\" AS Finding,\n         OSPath AS Evidence1,\n         Reason AS Evidence2,\n         MTime AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/WebRootChanges\"\n  )\n\nLET SUIDFiles <=\n  SELECT ClientId,\n         \"HIGH\" AS Severity,\n         \"SUID-Like Anomalous File\" AS Finding,\n         OSPath AS Evidence1,\n         Mode AS Evidence2,\n         Size AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/AnomalousFiles\"\n  )\n  WHERE HasSUID\n\nLET HiddenFiles <=\n  SELECT ClientId,\n         \"MEDIUM\" AS Severity,\n         \"Hidden File\" AS Finding,\n         OSPath AS Evidence1,\n         Mode AS Evidence2,\n         Size AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/AnomalousFiles\"\n  )\n  WHERE IsHidden\n\nLET ArchiveDumps <=\n  SELECT ClientId,\n         Severity,\n         \"Archive or Dump File\" AS Finding,\n         OSPath AS Evidence1,\n         Size AS Evidence2,\n         MTime AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/ArchiveAndDumpFiles\"\n  )\n\nLET SensitiveChanges <=\n  SELECT ClientId,\n         Severity,\n         \"Recent Sensitive File Change\" AS Finding,\n         OSPath AS Evidence1,\n         Reason AS Evidence2,\n         MTime AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/RecentSensitiveFiles\"\n  )\n  WHERE OSPath =~ \"^/(etc|usr/local/bin|opt|var/www|srv/www|tmp|var/tmp|dev/shm)/\"\n\nSELECT *\nFROM chain(\n  a=TempExecutables,\n  b=WebRootChanges,\n  c=SUIDFiles,\n  d=HiddenFiles,\n  e=ArchiveDumps,\n  f=SensitiveChanges\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 28,
+      "type": "markdown",
+      "input": "# Clients Needing Investigation\n\nThis section summarizes filesystem and timeline-related findings per client.\n\nClients with higher finding counts should be prioritized for deeper investigation, especially when temp executables, web root changes, SUID files, archive/dump files, or sensitive path changes are detected.\n\nThis view helps analysts quickly identify Linux endpoints that require follow-up hunts."
+    },
+    {
+      "order": 29,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET TempExecutables <=\n  SELECT ClientId,\n         \"Temp Executable File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/TempExecutableFiles\"\n  )\n\nLET WebRootChanges <=\n  SELECT ClientId,\n         \"Recent Web Root Change\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/WebRootChanges\"\n  )\n\nLET SUIDFiles <=\n  SELECT ClientId,\n         \"SUID-Like Anomalous File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/AnomalousFiles\"\n  )\n  WHERE HasSUID\n\nLET HiddenFiles <=\n  SELECT ClientId,\n         \"Hidden File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/AnomalousFiles\"\n  )\n  WHERE IsHidden\n\nLET ArchiveDumps <=\n  SELECT ClientId,\n         \"Archive or Dump File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/ArchiveAndDumpFiles\"\n  )\n\nLET SensitiveChanges <=\n  SELECT ClientId,\n         \"Recent Sensitive File Change\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.FileTimeline/RecentSensitiveFiles\"\n  )\n  WHERE OSPath =~ \"^/(etc|usr/local/bin|opt|var/www|srv/www|tmp|var/tmp|dev/shm)/\"\n\nLET Findings <=\n  SELECT *\n  FROM chain(\n    a=TempExecutables,\n    b=WebRootChanges,\n    c=SUIDFiles,\n    d=HiddenFiles,\n    e=ArchiveDumps,\n    f=SensitiveChanges\n  )\n\nSELECT ClientId,\n       count() AS FindingCount\nFROM Findings\nGROUP BY ClientId\nORDER BY FindingCount DESC"
+    },
+    {
+      "order": 30,
+      "type": "markdown",
+      "input": "## Recommended Next Actions\n\nClients with filesystem or timeline findings should be reviewed in deeper hunting phases.\n\nRecommended follow-up actions:\n\n1. Review executable files in temporary or writable paths.\n2. Investigate recent changes under `/etc`, `/usr/local/bin`, `/opt`, and web roots.\n3. Validate hidden files, large files, and SUID-like files.\n4. Review archive, backup, and database dump files for staging or exfiltration risk.\n5. Correlate filesystem timeline events with authentication, process, network, and persistence hunts.\n6. Run deeper file collection only for prioritized clients to avoid unnecessary endpoint load."
+    }
+  ]
+}
