@@ -1,0 +1,140 @@
+{
+  "name": "LTH - 13 - Data Access and Exfiltration Dashboard",
+  "module": 13,
+  "environment_variable_names": [],
+  "parameter_names": [
+    "ArtifactName"
+  ],
+  "cells": [
+    {
+      "order": 1,
+      "type": "markdown",
+      "input": "# LTH - 13 - Data Access and Exfiltration Dashboard\n\nThis notebook analyzes Linux data access and exfiltration indicators collected by:\n\n`LTH.DataExfil`\n\nMain objectives:\n\n- Review transfer-related processes\n- Review network connections from transfer tools\n- Identify archive, backup, dump, and encrypted staging files\n- Identify large recently modified files\n- Inventory sensitive and credential-like files\n- Review cloud CLI and object storage indicators\n- Review exfiltration-related command history\n- Prioritize clients that need deeper investigation"
+    },
+    {
+      "order": 2,
+      "type": "markdown",
+      "input": "# Transfer Processes\n\nThis section reviews running processes related to data staging, compression, remote transfer, object storage, tunneling, and possible exfiltration.\n\nProcesses such as `rclone`, `scp`, `sftp`, `rsync`, `aws s3`, `gsutil`, `curl`, `wget`, `nc`, and `socat` should be reviewed based on server role."
+    },
+    {
+      "order": 3,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Pid,\n       Ppid,\n       Name,\n       Username,\n       Exe,\n       CommandLine,\n       CreatedTime,\n       Deleted,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/TransferProcesses\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 4,
+      "type": "markdown",
+      "input": "# Network Transfer Connections\n\nThis section correlates network connections with transfer-related processes.\n\nOutbound connections from file transfer tools, cloud CLI tools, tunneling utilities, or raw network tools may indicate data movement or exfiltration."
+    },
+    {
+      "order": 5,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Status,\n       Laddr,\n       Lport,\n       Raddr,\n       Rport,\n       Pid,\n       ProcessName,\n       ProcessPath,\n       Username,\n       CommandLine,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/NetworkTransferConnections\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 6,
+      "type": "markdown",
+      "input": "# Archive and Dump Files\n\nThis section identifies archive, backup, dump, database, encrypted, and staging files.\n\nThese files may indicate data collection, database dumping, compression, encryption, or preparation for exfiltration."
+    },
+    {
+      "order": 7,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       OctalMode,\n       Owner,\n       Group,\n       Size,\n       MTime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/ArchiveDumpFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 8,
+      "type": "markdown",
+      "input": "# Large Recent Files\n\nThis section identifies large files that were recently modified in monitored paths.\n\nLarge recent files in temporary, user, web, or application directories may represent staged data or compressed collections."
+    },
+    {
+      "order": 9,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       OctalMode,\n       Owner,\n       Group,\n       Size,\n       MTime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/LargeRecentFiles\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 10,
+      "type": "markdown",
+      "input": "# Sensitive Files Inventory\n\nThis section inventories sensitive or credential-like files.\n\nIt does not return file contents. It only shows path, owner, mode, size, and timestamp to help identify files that may be targeted for collection or exfiltration."
+    },
+    {
+      "order": 11,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       OctalMode,\n       Owner,\n       Group,\n       Size,\n       MTime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/SensitiveFilesInventory\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 12,
+      "type": "markdown",
+      "input": "# High-Risk Sensitive Files"
+    },
+    {
+      "order": 13,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       OctalMode,\n       Owner,\n       Group,\n       Size,\n       MTime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/SensitiveFilesInventory\"\n)\nWHERE Severity = \"HIGH\"\nORDER BY ClientId"
+    },
+    {
+      "order": 14,
+      "type": "markdown",
+      "input": "# Cloud CLI Config Inventory\n\nThis section reviews cloud CLI and object storage configuration locations.\n\nAWS, GCP, Azure, rclone, and s3cmd configuration files may indicate cloud storage usage or potential exfiltration channels."
+    },
+    {
+      "order": 15,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       OctalMode,\n       Owner,\n       Group,\n       Size,\n       MTime,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/CloudCliConfigInventory\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 16,
+      "type": "markdown",
+      "input": "# Suspicious Cloud CLI Indicators"
+    },
+    {
+      "order": 17,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       LineNumber,\n       Indicator,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/SuspiciousCloudCliIndicators\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 18,
+      "type": "markdown",
+      "input": "# Exfiltration Command History\n\nThis section reviews shell history for commands related to compression, staging, remote transfer, cloud storage upload, encryption, and raw network transfer.\n\nCommand history findings should be correlated with process, file, network, and authentication evidence."
+    },
+    {
+      "order": 19,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       LineNumber,\n       CommandLine,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.DataExfil/ExfilCommandHistory\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 20,
+      "type": "markdown",
+      "input": "# Finding Count by Category"
+    },
+    {
+      "order": 21,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET TransferProcesses <=\n  SELECT ClientId,\n         \"Transfer Process\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/TransferProcesses\"\n  )\n  GROUP BY ClientId\n\nLET NetworkTransfers <=\n  SELECT ClientId,\n         \"Network Transfer Connection\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/NetworkTransferConnections\"\n  )\n  GROUP BY ClientId\n\nLET ArchiveDumps <=\n  SELECT ClientId,\n         \"Archive or Dump File\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ArchiveDumpFiles\"\n  )\n  GROUP BY ClientId\n\nLET LargeFiles <=\n  SELECT ClientId,\n         \"Large Recent File\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/LargeRecentFiles\"\n  )\n  GROUP BY ClientId\n\nLET SensitiveFiles <=\n  SELECT ClientId,\n         \"High-Risk Sensitive File\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SensitiveFilesInventory\"\n  )\n  WHERE Severity = \"HIGH\"\n  GROUP BY ClientId\n\nLET CloudIndicators <=\n  SELECT ClientId,\n         \"Suspicious Cloud CLI Indicator\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SuspiciousCloudCliIndicators\"\n  )\n  GROUP BY ClientId\n\nLET History <=\n  SELECT ClientId,\n         \"Exfiltration Command History\" AS Finding,\n         count() AS EventCount\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ExfilCommandHistory\"\n  )\n  GROUP BY ClientId\n\nSELECT *\nFROM chain(\n  a=TransferProcesses,\n  b=NetworkTransfers,\n  c=ArchiveDumps,\n  d=LargeFiles,\n  e=SensitiveFiles,\n  f=CloudIndicators,\n  g=History\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 22,
+      "type": "markdown",
+      "input": "# Final Findings Detail\n\nThis section combines data access and exfiltration indicators into one findings table.\n\nIt includes transfer processes, network transfer connections, archive/dump files, large recent files, high-risk sensitive files, cloud CLI indicators, and exfiltration-related command history.\n\nUse this table as the main evidence view for data access and exfiltration hunting."
+    },
+    {
+      "order": 23,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET TransferProcesses <=\n  SELECT ClientId,\n         Severity,\n         \"Transfer Process\" AS Finding,\n         Pid AS Evidence1,\n         Exe AS Evidence2,\n         CommandLine AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/TransferProcesses\"\n  )\n\nLET NetworkTransfers <=\n  SELECT ClientId,\n         Severity,\n         \"Network Transfer Connection\" AS Finding,\n         ProcessName AS Evidence1,\n         Raddr AS Evidence2,\n         CommandLine AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/NetworkTransferConnections\"\n  )\n\nLET ArchiveDumps <=\n  SELECT ClientId,\n         Severity,\n         \"Archive or Dump File\" AS Finding,\n         OSPath AS Evidence1,\n         Size AS Evidence2,\n         Reason AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ArchiveDumpFiles\"\n  )\n\nLET LargeFiles <=\n  SELECT ClientId,\n         Severity,\n         \"Large Recent File\" AS Finding,\n         OSPath AS Evidence1,\n         Size AS Evidence2,\n         MTime AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/LargeRecentFiles\"\n  )\n\nLET SensitiveFiles <=\n  SELECT ClientId,\n         Severity,\n         \"High-Risk Sensitive File\" AS Finding,\n         OSPath AS Evidence1,\n         OctalMode AS Evidence2,\n         Reason AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SensitiveFilesInventory\"\n  )\n  WHERE Severity = \"HIGH\"\n\nLET CloudIndicators <=\n  SELECT ClientId,\n         Severity,\n         \"Suspicious Cloud CLI Indicator\" AS Finding,\n         Path AS Evidence1,\n         Indicator AS Evidence2,\n         Reason AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SuspiciousCloudCliIndicators\"\n  )\n\nLET History <=\n  SELECT ClientId,\n         Severity,\n         \"Exfiltration Command History\" AS Finding,\n         Path AS Evidence1,\n         Reason AS Evidence2,\n         CommandLine AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ExfilCommandHistory\"\n  )\n\nSELECT *\nFROM chain(\n  a=TransferProcesses,\n  b=NetworkTransfers,\n  c=ArchiveDumps,\n  d=LargeFiles,\n  e=SensitiveFiles,\n  f=CloudIndicators,\n  g=History\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 24,
+      "type": "markdown",
+      "input": "# Clients Needing Investigation\n\nThis section summarizes data access and exfiltration findings per client.\n\nClients with higher finding counts should be prioritized for deeper investigation, especially when transfer processes, archive staging, large recent files, high-risk sensitive files, cloud CLI indicators, or exfiltration command history are detected.\n\nThis view helps analysts quickly identify Linux endpoints that require follow-up hunts."
+    },
+    {
+      "order": 25,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET TransferProcesses <=\n  SELECT ClientId,\n         \"Transfer Process\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/TransferProcesses\"\n  )\n\nLET NetworkTransfers <=\n  SELECT ClientId,\n         \"Network Transfer Connection\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/NetworkTransferConnections\"\n  )\n\nLET ArchiveDumps <=\n  SELECT ClientId,\n         \"Archive or Dump File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ArchiveDumpFiles\"\n  )\n\nLET LargeFiles <=\n  SELECT ClientId,\n         \"Large Recent File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/LargeRecentFiles\"\n  )\n\nLET SensitiveFiles <=\n  SELECT ClientId,\n         \"High-Risk Sensitive File\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SensitiveFilesInventory\"\n  )\n  WHERE Severity = \"HIGH\"\n\nLET CloudIndicators <=\n  SELECT ClientId,\n         \"Suspicious Cloud CLI Indicator\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/SuspiciousCloudCliIndicators\"\n  )\n\nLET History <=\n  SELECT ClientId,\n         \"Exfiltration Command History\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.DataExfil/ExfilCommandHistory\"\n  )\n\nLET Findings <=\n  SELECT *\n  FROM chain(\n    a=TransferProcesses,\n    b=NetworkTransfers,\n    c=ArchiveDumps,\n    d=LargeFiles,\n    e=SensitiveFiles,\n    f=CloudIndicators,\n    g=History\n  )\n\nSELECT ClientId,\n       count() AS FindingCount\nFROM Findings\nGROUP BY ClientId\nORDER BY FindingCount DESC"
+    },
+    {
+      "order": 26,
+      "type": "markdown",
+      "input": "# Recommended Next Actions\n\nClients with data access or exfiltration indicators should be reviewed in deeper investigation.\n\nRecommended follow-up actions:\n\n1. Review transfer process command lines and parent processes.\n2. Correlate outbound connections with process, user, and authentication activity.\n3. Review archive, dump, encrypted, and large recent files for staging behavior.\n4. Validate sensitive file inventory based on server role and access expectations.\n5. Investigate cloud CLI and object storage configuration indicators.\n6. Review command history for compression, transfer, encryption, or cloud upload activity.\n7. Collect suspicious files only from prioritized clients to reduce endpoint and server load."
+    }
+  ]
+}

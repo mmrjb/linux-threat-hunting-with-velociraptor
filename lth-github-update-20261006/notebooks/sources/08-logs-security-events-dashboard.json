@@ -1,0 +1,180 @@
+{
+  "name": "LTH - 08 - Logs and Security Events Dashboard",
+  "module": 8,
+  "environment_variable_names": [],
+  "parameter_names": [
+    "ArtifactName"
+  ],
+  "cells": [
+    {
+      "order": 1,
+      "type": "markdown",
+      "input": "# LTH - 08 - Logs and Security Events Dashboard\n\nThis notebook analyzes Linux log and security event data collected by:\n\n`LTH.LogSecurityEvents`\n\nMain objectives:\n\n- Review SSH login activity\n- Review authentication and session events\n- Review sudo and su activity\n- Identify user and group management events\n- Review service start/stop/reload events\n- Review audit and kernel security messages\n- Review suspicious command history\n- Prioritize clients that need deeper investigation"
+    },
+    {
+      "order": 2,
+      "type": "markdown",
+      "input": "# SSH Login Attempts\n\nThis section reviews SSH login attempts parsed from authentication logs.\n\nIt helps identify successful logins, failed attempts, invalid users, root login attempts, and suspicious source IPs."
+    },
+    {
+      "order": 3,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Time,\n       IP,\n       Result,\n       Method,\n       AttemptedUser,\n       OSPath\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 4,
+      "type": "markdown",
+      "input": "# Failed SSH Login Count per Client"
+    },
+    {
+      "order": 5,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       count() AS FailedSSHCount\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n)\nWHERE Result =~ \"(?i)(Failed|Invalid|failure)\"\nGROUP BY ClientId\nORDER BY FailedSSHCount DESC"
+    },
+    {
+      "order": 6,
+      "type": "markdown",
+      "input": "# Failed SSH Login Count by Source IP"
+    },
+    {
+      "order": 7,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT IP,\n       count() AS FailedCount\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n)\nWHERE Result =~ \"(?i)(Failed|Invalid|failure)\"\nGROUP BY IP\nORDER BY FailedCount DESC"
+    },
+    {
+      "order": 8,
+      "type": "markdown",
+      "input": "# Last User Login Inventory"
+    },
+    {
+      "order": 9,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       OSPath,\n       login_User,\n       login_Host,\n       login_IpAddr,\n       login_Terminal,\n       login_time,\n       logout_time\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/LastUserLogin\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 10,
+      "type": "markdown",
+      "input": "# Authentication Log Events\n\nThis section reviews authentication-related events from Linux auth logs.\n\nIt includes SSH activity, PAM events, session open/close events, failed authentication, and successful authentication."
+    },
+    {
+      "order": 11,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/AuthLogEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 12,
+      "type": "markdown",
+      "input": "# Sudo and SU Events\n\nThis section reviews privilege-related activity from sudo and su logs.\n\nCommands executed with elevated privileges should be reviewed carefully, especially when they involve downloaders, shells, scripting engines, or temporary paths."
+    },
+    {
+      "order": 13,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SudoSuEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 14,
+      "type": "markdown",
+      "input": "# User Management Events\n\nThis section reviews user and group management events.\n\nAccount creation, deletion, password changes, group membership changes, or unexpected administrative changes may indicate persistence or privilege abuse."
+    },
+    {
+      "order": 15,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/UserManagementEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 16,
+      "type": "markdown",
+      "input": "# Service Events\n\nThis section reviews Linux service start, stop, reload, enable, and disable events.\n\nUnexpected service changes may indicate persistence, attacker-controlled services, or operational changes that require validation."
+    },
+    {
+      "order": 17,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/ServiceEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 18,
+      "type": "markdown",
+      "input": "# Audit Events\n\nThis section reviews Linux audit log events when auditd is available.\n\nAudit events can provide important evidence about authentication, command execution, policy violations, denied actions, and suspicious security activity."
+    },
+    {
+      "order": 19,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/AuditEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 20,
+      "type": "markdown",
+      "input": "# Kernel Security Events\n\nThis section reviews kernel security related messages.\n\nKernel messages can show AppArmor or SELinux denials, module warnings, segmentation faults, firewall blocks, and other low-level security indicators."
+    },
+    {
+      "order": 21,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/KernelSecurityEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 22,
+      "type": "markdown",
+      "input": "# Command History Inventory\n\nThis section reviews Linux shell command history files.\n\nCommand history can help identify suspicious administrative activity, attacker tooling, downloaders, staging commands, reverse shell attempts, and cleanup commands."
+    },
+    {
+      "order": 23,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/CommandHistoryLines\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 24,
+      "type": "markdown",
+      "input": "# Suspicious Command History"
+    },
+    {
+      "order": 25,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       Line,\n       Severity,\n       Reason\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SuspiciousCommandHistory\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 26,
+      "type": "markdown",
+      "input": "# Suspicious Security Events\n\nThis section combines high-value suspicious events across Linux security logs.\n\nIt includes failed authentication, root login activity, user management changes, suspicious sudo commands, audit alerts, denied actions, and kernel security warnings."
+    },
+    {
+      "order": 27,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       Path,\n       EventCategory,\n       Severity,\n       Line\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SuspiciousSecurityEvents\"\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 28,
+      "type": "markdown",
+      "input": "# Security Event Count per Client"
+    },
+    {
+      "order": 29,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nSELECT ClientId,\n       count() AS SuspiciousEventCount\nFROM hunt_results(\n  hunt_id=HuntId,\n  artifact=\"LTH.LogSecurityEvents/SuspiciousSecurityEvents\"\n)\nGROUP BY ClientId\nORDER BY SuspiciousEventCount DESC"
+    },
+    {
+      "order": 30,
+      "type": "markdown",
+      "input": "# Final Findings Detail\n\nThis section combines suspicious log and security event indicators into one findings table.\n\nIt includes failed SSH login activity, suspicious security events, user management changes, suspicious command history, audit events, and kernel security messages.\n\nUse this table as the main evidence view for log and security event hunting."
+    },
+    {
+      "order": 31,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET FailedSSH <=\n  SELECT ClientId,\n         \"MEDIUM\" AS Severity,\n         \"Failed SSH Login\" AS Finding,\n         AttemptedUser AS Evidence1,\n         IP AS Evidence2,\n         Result AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n  )\n  WHERE Result =~ \"(?i)(Failed|Invalid|failure)\"\n\nLET RootSSH <=\n  SELECT ClientId,\n         \"HIGH\" AS Severity,\n         \"Root SSH Login Attempt\" AS Finding,\n         AttemptedUser AS Evidence1,\n         IP AS Evidence2,\n         Result AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n  )\n  WHERE AttemptedUser = \"root\"\n\nLET UserManagement <=\n  SELECT ClientId,\n         Severity,\n         \"User Management Event\" AS Finding,\n         Path AS Evidence1,\n         EventCategory AS Evidence2,\n         Line AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/UserManagementEvents\"\n  )\n\nLET SuspiciousSecurity <=\n  SELECT ClientId,\n         Severity,\n         \"Suspicious Security Event\" AS Finding,\n         Path AS Evidence1,\n         EventCategory AS Evidence2,\n         Line AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SuspiciousSecurityEvents\"\n  )\n\nLET SuspiciousHistory <=\n  SELECT ClientId,\n         Severity,\n         \"Suspicious Command History\" AS Finding,\n         Path AS Evidence1,\n         Reason AS Evidence2,\n         Line AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SuspiciousCommandHistory\"\n  )\n\nLET AuditHigh <=\n  SELECT ClientId,\n         Severity,\n         \"Audit Security Event\" AS Finding,\n         Path AS Evidence1,\n         EventCategory AS Evidence2,\n         Line AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/AuditEvents\"\n  )\n  WHERE Severity =~ \"HIGH|MEDIUM\"\n\nLET KernelHigh <=\n  SELECT ClientId,\n         Severity,\n         \"Kernel Security Event\" AS Finding,\n         Path AS Evidence1,\n         EventCategory AS Evidence2,\n         Line AS Evidence3\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/KernelSecurityEvents\"\n  )\n  WHERE Severity =~ \"HIGH|MEDIUM\"\n\nSELECT *\nFROM chain(\n  a=FailedSSH,\n  b=RootSSH,\n  c=UserManagement,\n  d=SuspiciousSecurity,\n  e=SuspiciousHistory,\n  f=AuditHigh,\n  g=KernelHigh\n)\nORDER BY ClientId"
+    },
+    {
+      "order": 32,
+      "type": "markdown",
+      "input": "# Clients Needing Investigation\n\nThis section summarizes log and security event findings per client.\n\nClients with higher finding counts should be prioritized for deeper investigation, especially when failed logins, root access, account changes, suspicious commands, audit alerts, or kernel security events are detected.\n\nThis view helps analysts quickly identify Linux endpoints that require follow-up hunts."
+    },
+    {
+      "order": 33,
+      "type": "vql",
+      "input": "LET HuntId <= \"HUNT_ID\"\n\nLET FailedSSH <=\n  SELECT ClientId,\n         \"Failed SSH Login\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n  )\n  WHERE Result =~ \"(?i)(Failed|Invalid|failure)\"\n\nLET RootSSH <=\n  SELECT ClientId,\n         \"Root SSH Login Attempt\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SSHLogin\"\n  )\n  WHERE AttemptedUser = \"root\"\n\nLET UserManagement <=\n  SELECT ClientId,\n         \"User Management Event\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/UserManagementEvents\"\n  )\n\nLET SuspiciousSecurity <=\n  SELECT ClientId,\n         \"Suspicious Security Event\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SuspiciousSecurityEvents\"\n  )\n\nLET SuspiciousHistory <=\n  SELECT ClientId,\n         \"Suspicious Command History\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/SuspiciousCommandHistory\"\n  )\n\nLET AuditHigh <=\n  SELECT ClientId,\n         \"Audit Security Event\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/AuditEvents\"\n  )\n  WHERE Severity =~ \"HIGH|MEDIUM\"\n\nLET KernelHigh <=\n  SELECT ClientId,\n         \"Kernel Security Event\" AS Finding\n  FROM hunt_results(\n    hunt_id=HuntId,\n    artifact=\"LTH.LogSecurityEvents/KernelSecurityEvents\"\n  )\n  WHERE Severity =~ \"HIGH|MEDIUM\"\n\nLET Findings <=\n  SELECT *\n  FROM chain(\n    a=FailedSSH,\n    b=RootSSH,\n    c=UserManagement,\n    d=SuspiciousSecurity,\n    e=SuspiciousHistory,\n    f=AuditHigh,\n    g=KernelHigh\n  )\n\nSELECT ClientId,\n       count() AS FindingCount\nFROM Findings\nGROUP BY ClientId\nORDER BY FindingCount DESC"
+    },
+    {
+      "order": 34,
+      "type": "markdown",
+      "input": "# Recommended Next Actions\n\nClients with log or security event findings should be reviewed in deeper hunting phases.\n\nRecommended follow-up actions:\n\n1. Review failed SSH login attempts and source IPs.\n2. Validate root login attempts and successful privileged access.\n3. Investigate user and group management events.\n4. Review suspicious sudo/su commands and command history.\n5. Correlate audit and kernel events with process, network, persistence, and privilege escalation hunts.\n6. Run deeper investigation on clients with high finding counts."
+    }
+  ]
+}
