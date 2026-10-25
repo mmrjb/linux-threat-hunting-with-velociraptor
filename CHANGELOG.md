@@ -8,7 +8,7 @@
 - Disable cron file uploads by default and explicitly in the baseline/persistence wrappers.
 - Retain unresolved socket owners with default filters; collect all baseline TCP/UDP states.
 - Include inactive loaded service units and disable pagination, headings and truncated unit names.
-- Add native Velociraptor verification and focused baseline/triage regression commands to CI. Execution remains pending in this preparation environment.
+- Add native Velociraptor 0.76.5 verification for all 381 VQL inputs and five passing baseline/triage regression tests to CI.
 - Reject accidentally nested update-package directories during structural validation.
 - Document baseline source coverage, fresh collection requirements and verification limits.
 

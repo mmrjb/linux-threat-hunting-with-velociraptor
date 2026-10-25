@@ -1,8 +1,9 @@
 # Validation report
 
-Date: 2026-10-25. Compatibility target: Velociraptor 0.76.5.
+Date: 2026-10-25. Verified engine: Velociraptor 0.76.5, Linux amd64,
+commit a58cde830. The official binary is pinned by SHA-256 in CI.
 
-## Checks completed in the preparation environment
+## Repository structure
 
 | Check | Result |
 | --- | ---: |
@@ -16,45 +17,56 @@ Date: 2026-10-25. Compatibility target: Velociraptor 0.76.5.
 | VQL / Markdown cells | 242 / 266 |
 | Paused hunt creation templates | 14 |
 | Structural warnings / errors | 0 / 0 |
-| VQL snippets checked for balanced quotes, comments and delimiters | 853 |
-| Lexical failures / possible multi-field ORDER BY occurrences | 0 / 0 |
 
 Structural validation covers YAML, artifact/source names and references,
 notebook JSON/Markdown consistency and order, public identifiers, dependency
-resolution and paused, label-guarded hunt templates. The independent lexical
-review included artifact queries, legacy query lists, preconditions, exports,
-report queries, notebook cells and hunt templates. It is not a VQL compiler.
+resolution, paused label-guarded hunt templates, conflicting precondition
+levels and accidentally nested update directories.
 
 All fifteen recovered notebook source JSON files and fourteen hunt templates
 were retained byte for byte while moving the update into the repository root.
 The two previously published root notebook documents were replaced by their
 complete recovered versions. The generated artifact catalog was refreshed.
+The prepared patch was also applied to a fresh checkout and its resulting
+Git tree matched the reviewed tree exactly.
 
-## Native verification and regression checks prepared
+## Native VQL verification: passed
 
-The CI workflow downloads the official Velociraptor 0.76.5 Linux binary and
-checks its published SHA-256 before use. The verification helper wraps
-operational VQL in temporary artifacts for static verification; it does not
-execute hunt creation or endpoint collection.
+Successful [GitHub Actions run](https://github.com/mmrjb/linux-threat-hunting-with-velociraptor/actions/runs/40223195727)
+for source commit `37c0a7fc5acd3607954ee20d481efa11b172fad1`.
 
-Configured verification scope: 114 collectors, 242 notebook VQL cells,
-14 hunt templates and 11 extracted report queries (381 artifact inputs).
+| Native verifier input | Passed |
+| --- | ---: |
+| Collector definitions | 114 |
+| Notebook VQL cells | 242 |
+| Hunt templates | 14 |
+| Extracted report queries | 11 |
+| Total artifact inputs | 381 |
 
-The five regression tests cover:
+The verification helper wraps notebook/hunt/report VQL in temporary artifacts
+and uses the engine's static verifier. It does not execute operational hunts
+or collect endpoints. The workflow also checks the generated catalog against
+the committed version.
 
-- System/user cron parsing, complete commands and preserved unparsed evidence.
-- Upload disabled when collecting every cron source, including both collectors.
-- Bounded script content and truncation metadata.
-- Local TCP/UDP socket visibility without a configured process tracker.
-- Zero-risk versus critical UID-0 priority, missing collection data and evidence deduplication in Master Triage.
+## Behavioral regressions: 5 passed
 
-These native checks were NOT executed in this preparation environment: the
-Velociraptor binary is unavailable locally, its direct download is blocked by
-the network proxy, and the GitHub connection rejected branch creation with
-HTTP 403. Git push also lacks write authentication. No CI run or successful
-publication is claimed for these changes.
+The same CI run executed all five tests with Velociraptor 0.76.5:
 
-Run the checks after applying the patch in an environment with the binary:
+- System/user cron parsing preserves all four fixture commands, including
+  regular and @reboot schedules, and retains the unparsed line and parser metadata.
+- Both cron collectors return no upload rows by default, including when called
+  directly for all sources; explicit source preconditions alone are insufficient
+  because VQL callers can bypass them. The acquisition query has its own opt-in gate.
+- Script content is bounded and truncation metadata is returned.
+- Local TCP/UDP fixture sockets remain visible without a configured process
+  tracker; an explicit nonmatching process filter excludes them.
+- Master Triage separates zero score, a critical UID-0 score of five and missing
+  collection data; repeated account evidence does not multiply its area score.
+
+These tests use temporary fixture files, local test sockets and synthetic
+hunt-result rows. They do not use production evidence or a deployed server.
+
+## Reproduce
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
@@ -64,14 +76,18 @@ python3 scripts/validate_vql.py --binary /usr/local/bin/velociraptor
 python3 scripts/test_baseline.py --binary /usr/local/bin/velociraptor
 ```
 
+The helper selects the supported verifier command and uses temporary local
+configuration. CI downloads the official pinned binary and checks its digest.
+
 ## Operational limits
 
 No production endpoint or deployed Velociraptor service was changed. Complete
-an endpoint canary test before fleet deployment. Old hunts remain historical
-snapshots and need fresh collection to use corrected parser/network/service
-behavior. Row presence does not establish complete collection; scores do not
-establish compromise. Pattern-based disclosure checks do not replace content
-review. See [Baseline and Master Triage](baseline-and-triage.md).
+an endpoint canary test before fleet deployment, including distro-specific
+package and service collection. Old hunts remain historical snapshots and
+need fresh collection to use corrected parser/network/service behavior.
+Row presence does not establish complete collection; scores do not establish
+compromise. Pattern-based disclosure checks do not replace content review.
+See [Baseline and Master Triage](baseline-and-triage.md).
 
 The previous source comparison is recorded in
 [Source review and October 2026 update](source-update-20261006.md).
