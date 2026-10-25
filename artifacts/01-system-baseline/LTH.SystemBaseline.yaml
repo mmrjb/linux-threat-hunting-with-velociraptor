@@ -88,7 +88,7 @@ sources:
       WHERE OS = "linux"
     query: |
       SELECT *
-      FROM Artifact.LTH.SystemBaseline.Crontab()
+      FROM Artifact.LTH.SystemBaseline.Crontab(UploadFiles=FALSE)
 
   - name: DebianPackages
     description: Installed Debian/Ubuntu packages. This source only runs on Debian-based systems.

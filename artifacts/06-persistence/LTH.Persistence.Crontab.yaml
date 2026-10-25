@@ -1,63 +1,90 @@
 name: LTH.Persistence.Crontab
 author: Rajabzadeh
 description: |
-  Displays parsed information from crontab.
+  Parse system and per-user crontabs without losing the first command token.
+  ParserVersion 2 preserves RawLine and marks non-comment, non-environment
+  lines that could not be parsed. System files include a username field;
+  per-user spool files derive the username from the filename. This covers
+  cron syntax, not the separate at-job format. Script content is bounded
+  by Length. File upload requires an explicit UploadFiles opt-in.
+type: CLIENT
+
 parameters:
   - name: cronTabGlob
-    default: /etc/crontab,/etc/cron.d/**,/var/at/tabs/**,/var/spool/cron/**,/var/spool/cron/crontabs/**
+    default: /etc/crontab,/etc/cron.d/*,/var/spool/cron/**
   - name: cronTabScripts
     default: /etc/cron.daily/*,/etc/cron.hourly/*,/etc/cron.monthly/*,/etc/cron.weekly/*
+  - name: SystemCronPathRegex
+    description: Paths using system crontab syntax, with an explicit username. Override for nonstandard paths.
+    default: '^/etc/(crontab$|cron\.d/)'
+    type: regex
   - name: Length
     default: 10000
     type: int
+  - name: UploadFiles
+    description: Also upload the original cron files and scripts. Disabled by default.
+    default: "N"
+    type: bool
 
-precondition: SELECT OS From info() where OS = 'linux'
+precondition: SELECT OS FROM info() WHERE OS = 'linux'
 
 sources:
   - name: CronTabs
     query: |
+      LET ScheduleRegex = '''(?P<Minute>\S+)\s+(?P<Hour>\S+)\s+(?P<DayOfMonth>\S+)\s+(?P<Month>\S+)\s+(?P<DayOfWeek>\S+)\s+'''
       LET raw = SELECT * FROM foreach(
-          row={
-            SELECT OSPath from glob(globs=split(string=cronTabGlob, sep=","))
-          },
-          query={
-            SELECT OSPath, data, parse_string_with_regex(
-              string=data,
-              regex=[
-                 /* Regex for event (Starts with @) */
-                 "^(?P<Event>@[a-zA-Z]+)\\s+(?P<Command>.+)",
-
-                 /* Regex for regular command. */
-                 "^(?P<Minute>[^\\s]+)\\s+"+
-                 "(?P<Hour>[^\\s]+)\\s+"+
-                 "(?P<DayOfMonth>[^\\s]+)\\s+"+
-                 "(?P<Month>[^\\s]+)\\s+"+
-                 "(?P<DayOfWeek>[^\\s]+)\\s+"+
-                 "(?P<User>[^\\s]+)\\s+"+
-                 "(?P<Command>.+)$"]) as Record
-
-            /* Read lines from the file and filter ones that start with "#" */
-            FROM split_records(
-               filenames=OSPath,
-               regex="\n", columns=["data"]) WHERE not data =~ "^\\s*#"
-            }) WHERE Record.Command
+        row={
+          SELECT OSPath, OSPath =~ SystemCronPathRegex AS IsSystemCron
+          FROM glob(globs=split(string=cronTabGlob, sep=","))
+          WHERE NOT IsDir
+          GROUP BY OSPath
+        },
+        query={
+          SELECT OSPath, IsSystemCron, Line AS RawLine,
+            parse_string_with_regex(string=Line, regex=if(
+              condition=IsSystemCron,
+              then=[
+                '''^\s*(?P<Event>@[a-zA-Z]+)\s+(?P<User>\S+)\s+(?P<Command>.+)$''',
+                '''^\s*''' + ScheduleRegex + '''(?P<User>\S+)\s+(?P<Command>.+)$'''
+              ],
+              else=[
+                '''^\s*(?P<Event>@[a-zA-Z]+)\s+(?P<Command>.+)$''',
+                '''^\s*''' + ScheduleRegex + '''(?P<Command>.+)$'''
+              ])) AS Record
+          FROM parse_lines(filename=OSPath)
+          WHERE NOT Line =~ '''^\s*(#|$|[A-Za-z_][A-Za-z0-9_]*\s*=)'''
+        })
 
       SELECT Record.Event AS Event,
-               Record.User AS User,
-               Record.Minute AS Minute,
-               Record.Hour AS Hour,
-               Record.DayOfMonth AS DayOfMonth,
-               Record.Month AS Month,
-               Record.DayOfWeek AS DayOfWeek,
-               Record.Command AS Command,
-               OSPath AS Path
+             if(condition=IsSystemCron, then=Record.User, else=basename(path=OSPath)) AS User,
+             Record.Minute AS Minute,
+             Record.Hour AS Hour,
+             Record.DayOfMonth AS DayOfMonth,
+             Record.Month AS Month,
+             Record.DayOfWeek AS DayOfWeek,
+             Record.Command AS Command,
+             OSPath AS Path,
+             RawLine,
+             if(condition=Record.Command, then="Parsed", else="Unparsed") AS ParseStatus,
+             if(condition=IsSystemCron, then="System", else="User") AS CronFormat,
+             2 AS ParserVersion
       FROM raw
+
   - name: CronScripts
     query: |
-      SELECT Mtime, OSPath, read_file(filename=OSPath,length=Length) AS Content
+      SELECT Mtime, OSPath, OSPath AS Path, Size,
+             read_file(filename=OSPath, length=Length) AS Content,
+             Size > Length AS PotentiallyTruncated,
+             "Script" AS ParseStatus,
+             2 AS ParserVersion
       FROM glob(globs=split(string=cronTabScripts, sep=","))
+      WHERE NOT IsDir AND Length > 0
+      GROUP BY OSPath
+
   - name: Uploaded
+    precondition: SELECT * FROM scope() WHERE UploadFiles
     query: |
       SELECT OSPath, upload(file=OSPath) AS Upload
       FROM glob(globs=split(string=cronTabGlob + "," + cronTabScripts, sep=","))
-
+      WHERE NOT IsDir
+      GROUP BY OSPath

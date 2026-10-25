@@ -18,7 +18,7 @@ sources:
       WHERE OS = "linux"
     query: |
       SELECT *
-      FROM Artifact.LTH.Persistence.Crontab()
+      FROM Artifact.LTH.Persistence.Crontab(UploadFiles=FALSE)
 
   - name: AuthorizedKeys
     description: SSH authorized_keys persistence entries.

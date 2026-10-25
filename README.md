@@ -11,12 +11,15 @@ The project is designed for repeatable fleet-wide collection, fast analyst triag
 | Velociraptor version used | `0.76.5` |
 | Artifact definitions | 114 |
 | Investigation domains | 14 |
+| Analysis notebooks | 15 |
+| Ordered notebook cells | 508 |
+| Paused hunt creation templates | 14 |
 | Internal `LTH.*` dependencies resolved | 100 / 100 |
 | YAML parse errors | 0 |
 | Duplicate artifact names | 0 |
 | Hard-coded Hunt or Client IDs | 0 |
 
-The exported definitions were structurally validated on 2026-07-29. See [Validation Report](docs/validation-report.md) for scope and limitations.
+The complete notebook and hunt update is integrated at the repository root. The October 25 maintenance update corrects baseline collection and adds Velociraptor VQL verification and focused regression checks. See [Validation Report](docs/validation-report.md) for scope and limitations.
 
 ## Investigation workflow
 
@@ -56,7 +59,8 @@ The workflow begins with coverage and collection health, not isolated alerts. An
 .
 ├── artifacts/              # 14 recursively loadable artifact groups
 ├── docs/                   # Architecture, setup, workflow and validation
-├── notebooks/              # Sanitized hunt notebook templates
+├── notebooks/              # 15 analysis notebooks and ordered cell source JSON
+├── hunts/                  # 14 label-scoped paused hunt creation templates
 ├── examples/mock-results/  # Safe examples only; never production evidence
 ├── images/screenshots/     # Redacted screenshots for documentation
 ├── scripts/                # Repository validation and catalog generation
@@ -86,18 +90,35 @@ xargs -0 sudo "$VR_BIN" \
   artifacts verify
 ```
 
+For an isolated check with a local Velociraptor binary, including all notebook
+cells, hunt templates and report queries:
+
+```bash
+python3 scripts/validate_vql.py --binary "$VR_BIN"
+python3 scripts/test_baseline.py --binary "$VR_BIN"
+```
+
+The helper also supports older builds exposing the top-level `verify` command.
+It uses temporary local configuration and does not collect endpoints. The
+regression suite reads temporary cron fixtures, inspects local test sockets
+and evaluates Master Triage against synthetic rows.
+
 ### 3. Load the definitions
 
 Use the Velociraptor GUI artifact import workflow, or provide the repository's `artifacts/` directory through a supported artifact-definition directory or the CLI `--definitions` option. Do not write directly into the live datastore.
 
 Detailed options are documented in [Installation and Import](docs/installation.md).
 
-## Notebooks
+## Notebooks and hunts
 
-- [Master Triage](notebooks/00-master-triage.md) correlates process, network, and persistence evidence across clients.
-- [Network Connections Dashboard](notebooks/05-network-connections-dashboard.md) inventories listening and established connections and highlights suspicious exposure.
+Start with the [complete Baseline and Master Triage guide](docs/baseline-and-triage.md)
+for the ten baseline result sources, collection checks and investigation order.
 
-Every public template uses `HUNT_ID` as a placeholder. No production Hunt IDs, Client IDs, hostnames, usernames, or IP addresses are included.
+The [notebook catalog](notebooks/README.md) covers LTH-00 through LTH-14. Master Triage and the baseline dashboard share the baseline hunt; the other dashboards analyze their collection domain. Replace `HUNT_ID` in your own environment. The LTH-02 coverage cell additionally needs `BASELINE_HUNT_ID` for its fleet anchor.
+
+The [hunt templates](hunts/README.md) create 14 fresh, paused, label-scoped hunts. Set the target label and review parameters, upload behavior and resource limits before starting a collection. Existing hunt history and results are not restored by these templates.
+
+The notebook JSON files are ordered source templates, not native notebook import archives. See the [source review and update record](docs/source-update-20261006.md) for provenance, corrections and runtime verification limits.
 
 ## Operational safety
 
@@ -113,7 +134,7 @@ Read [SECURITY.md](SECURITY.md) and [Operational Considerations](docs/installati
 
 ## Validation and quality
 
-The included validator checks YAML parsing, names, filenames, duplicate sources, internal dependencies, named-source references, common secret patterns, and hard-coded Hunt or Client IDs.
+The included validator checks YAML parsing, names, filenames, duplicate sources, internal dependencies, named-source references, common secret patterns, hard-coded Hunt or Client IDs, notebook artifact/source references, ordered JSON/Markdown cells, and paused hunt template settings.
 
 ```bash
 python3 scripts/validate_repository.py

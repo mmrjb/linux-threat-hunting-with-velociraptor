@@ -1,60 +1,77 @@
-# Validation Report
+# Validation report
 
-## Scope
+Date: 2026-10-25. Compatibility target: Velociraptor 0.76.5.
 
-| Item | Value |
-| --- | --- |
-| Source archive | `linux-threat-hunting-with-velociraptor-20260729-152520.tar.gz` |
-| Source SHA-256 | `19b898b509f525fe76ca2e5e0a947c0d580b0fbff742c4ebd15203d59d5fbf95` |
-| Validation date | 2026-07-29 |
-| Exporting Velociraptor version | `0.76.5` |
-| Artifact definitions | 114 |
-
-## Results
+## Checks completed in the preparation environment
 
 | Check | Result |
 | --- | ---: |
-| Safe archive paths | Pass |
-| YAML files parsed | 114 / 114 |
-| Unique artifact names | 114 / 114 |
-| Filename-to-name matches | 114 / 114 |
-| Duplicate source names | 0 |
-| Multi-source artifacts with unnamed sources | 0 |
-| Distinct internal `LTH.*` dependency targets resolved | 100 / 100 |
-| Total internal dependency references resolved | 156 / 156 |
-| Invalid named-source references | 0 |
-| Hard-coded Hunt IDs | 0 |
-| Hard-coded Client IDs | 0 |
-| Embedded private-key material | 0 |
-| Hard-coded IP addresses or email addresses | 0 |
+| Artifact definitions / unique names | 114 / 114 |
+| Internal dependency references / distinct resolved targets | 156 / 100 |
+| Baseline definitions / wrapper result sources | 10 / 10 |
+| Implicit artifact types | 28 |
+| Definitions using execve() / containing upload() | 39 / 8 |
+| Notebook source templates | 15 |
+| Ordered notebook cells | 508 |
+| VQL / Markdown cells | 242 / 266 |
+| Paused hunt creation templates | 14 |
+| Structural warnings / errors | 0 / 0 |
+| VQL snippets checked for balanced quotes, comments and delimiters | 853 |
+| Lexical failures / possible multi-field ORDER BY occurrences | 0 / 0 |
 
-Three strings matching private-key headers are intentional detection signatures inside `LTH.AuthSSH.PrivateKeys`; they are not key material.
+Structural validation covers YAML, artifact/source names and references,
+notebook JSON/Markdown consistency and order, public identifiers, dependency
+resolution and paused, label-guarded hunt templates. The independent lexical
+review included artifact queries, legacy query lists, preconditions, exports,
+report queries, notebook cells and hunt templates. It is not a VQL compiler.
 
-## Schema observations
+All fifteen recovered notebook source JSON files and fourteen hunt templates
+were retained byte for byte while moving the update into the repository root.
+The two previously published root notebook documents were replaced by their
+complete recovered versions. The generated artifact catalog was refreshed.
 
-- 84 definitions explicitly declare `type: CLIENT`.
-- 30 exported definitions use the artifact type implicitly.
-- Three service artifacts use the supported legacy `queries` list rather than a singular `query` field.
+## Native verification and regression checks prepared
 
-These observations are warnings for maintainability, not YAML or dependency failures. The repository preserves the exported artifact code to avoid changing working collection logic without a live retest.
+The CI workflow downloads the official Velociraptor 0.76.5 Linux binary and
+checks its published SHA-256 before use. The verification helper wraps
+operational VQL in temporary artifacts for static verification; it does not
+execute hunt creation or endpoint collection.
 
-## Behavioral observations
+Configured verification scope: 114 collectors, 242 notebook VQL cells,
+14 hunt templates and 11 extracted report queries (381 artifact inputs).
 
-- 39 definitions contain `execve()` discovery commands.
-- 8 definitions contain conditional or source-specific `upload()` logic.
-- Sensitive-data collectors exist for SSH, command history, cloud CLI, configuration, process environment, and secret indicators.
+The five regression tests cover:
 
-Review [Security Policy](../SECURITY.md) and [Installation and Import](installation.md) before deployment.
+- System/user cron parsing, complete commands and preserved unparsed evidence.
+- Upload disabled when collecting every cron source, including both collectors.
+- Bounded script content and truncation metadata.
+- Local TCP/UDP socket visibility without a configured process tracker.
+- Zero-risk versus critical UID-0 priority, missing collection data and evidence deduplication in Master Triage.
 
-## Limitations
+These native checks were NOT executed in this preparation environment: the
+Velociraptor binary is unavailable locally, its direct download is blocked by
+the network proxy, and the GitHub connection rejected branch creation with
+HTTP 403. Git push also lacks write authentication. No CI run or successful
+publication is claimed for these changes.
 
-This validation confirms archive safety, YAML structure, naming, internal references, and common publication-hygiene checks.
+Run the checks after applying the patch in an environment with the binary:
 
-It does not:
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/validate_repository.py
+python3 scripts/generate_artifact_catalog.py
+python3 scripts/validate_vql.py --binary /usr/local/bin/velociraptor
+python3 scripts/test_baseline.py --binary /usr/local/bin/velociraptor
+```
 
-- execute every VQL source;
-- prove compatibility with Velociraptor versions other than the export environment;
-- measure endpoint performance;
-- validate every Linux distribution or package version;
-- determine whether every result is a true positive;
-- replace server-side `artifacts verify` and canary collection.
+## Operational limits
+
+No production endpoint or deployed Velociraptor service was changed. Complete
+an endpoint canary test before fleet deployment. Old hunts remain historical
+snapshots and need fresh collection to use corrected parser/network/service
+behavior. Row presence does not establish complete collection; scores do not
+establish compromise. Pattern-based disclosure checks do not replace content
+review. See [Baseline and Master Triage](baseline-and-triage.md).
+
+The previous source comparison is recorded in
+[Source review and October 2026 update](source-update-20261006.md).

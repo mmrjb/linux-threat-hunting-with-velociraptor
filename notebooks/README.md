@@ -32,6 +32,6 @@ Master Triage and LTH-01 both read the baseline hunt. Master Triage is an analys
 
 ## Interpretation
 
-Risk scores and review leads prioritize investigation. They do not establish compromise. Empty result sources may be valid, missing, failed or inapplicable; row presence alone does not establish full coverage. Master Triage explicitly reports legacy/unparsed Cron data. The recovered collector snapshots contain the legacy Cron parser, so parser review warnings can be expected; do not assume parser-v2 fields were collected.
+Risk scores and review leads prioritize investigation. They do not establish compromise. Empty result sources may be valid, missing, failed or inapplicable; row presence alone does not establish full coverage. Master Triage explicitly reports legacy/unparsed Cron data. The October 25 collectors return parser-v2 fields; older hunt snapshots retain the legacy schema until a new collection is performed. Inspect `RawLine`, `ParseStatus` and `PotentiallyTruncated` before interpreting cron findings.
 
 The October update restores the public special-purpose CIDRs `0.0.0.0/8`, `224.0.0.0/4` and `240.0.0.0/4` that the intermediate review export masked. Current cell inputs were exported without calculated results, logs or attachments. LTH-02 cell 3 was corrected for the documented wrapper source names; other exported notebook behavior was retained.

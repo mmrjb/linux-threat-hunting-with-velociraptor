@@ -42,6 +42,20 @@ xargs -0 sudo "$VR_BIN" \
 
 Stop if verification reports an error.
 
+For builds that expose the verifier as a top-level command, use `verify` in
+place of `artifacts verify`. The following helper selects the supported command
+and verifies all collectors, notebook cells, hunt templates and extracted
+report queries with temporary configuration:
+
+```bash
+python3 scripts/validate_vql.py --binary "$VR_BIN"
+python3 scripts/test_baseline.py --binary "$VR_BIN"
+```
+
+These commands do not connect to the deployed server. The tests use temporary
+cron fixtures, local test sockets and synthetic Master Triage rows. Complete
+the endpoint canary test below separately.
+
 ## 3. Import options
 
 ### Option A: GUI artifact-pack import
@@ -129,7 +143,11 @@ Thirty-nine definitions contain `execve()` calls. These commands are intended fo
 
 ### File upload
 
-Eight definitions contain `upload()` logic. Some are parameter controlled; cron artifacts also expose a dedicated `Uploaded` source. Select sources deliberately and verify upload settings before hunts.
+Eight definitions contain `upload()` logic. Cron upload now requires
+`UploadFiles=TRUE`, and the baseline/persistence wrappers explicitly pass
+`UploadFiles=FALSE`. To acquire original cron files deliberately, collect the
+child artifact with that parameter enabled and select its `Uploaded` source.
+Other collectors retain their existing upload controls.
 
 ### Sensitive content
 

@@ -1,3 +1,9 @@
+# LTH - 00 - Master Triage
+
+Ordered notebook cell inputs. This file and its companion JSON are source templates, not a native Velociraptor import archive. Replace HUNT_ID with the ID of the appropriate hunt in your own environment.
+
+## Cell 1 (markdown)
+
 # Linux Threat Hunting — Master Triage
 
 ## Objective
@@ -19,17 +25,11 @@ A risk score is used for prioritization only.
 It does not prove that a client is compromised.
 Final conclusions require evidence correlation and timeline analysis.
 
-## Public-template usage
+## Cell 2 (markdown)
 
-1. Run the broad `LTH.SystemBaseline` hunt before using this notebook.
-2. Replace every `HUNT_ID` placeholder with the secured hunt identifier inside Velociraptor.
-3. Keep the real Hunt ID, Client IDs, hostnames, usernames, and IP addresses out of public commits.
-4. `EnableLabIndicators` is set to `TRUE` to reproduce the presentation lab. Set it to `FALSE` before production use.
-5. Treat the score as an investigation priority, not as proof of compromise.
+# Baseline Hunt Client Inventory
 
-## Cell 1 — Baseline Hunt Client Inventory
-
-Confirms that expected endpoints returned baseline identity data before analysts interpret empty findings.
+## Cell 3 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -45,9 +45,11 @@ GROUP BY ClientId
 ORDER BY Fqdn
 ```
 
-## Cell 2 — Suspicious Users
+## Cell 4 (markdown)
 
-Identifies additional UID 0 accounts that require immediate ownership and authorization validation.
+# Suspicious Users
+
+## Cell 5 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -88,9 +90,11 @@ WHERE str(str=Uid) = "0"
 ORDER BY Fqdn
 ```
 
-## Cell 3 — Suspicious Processes
+## Cell 6 (markdown)
 
-Classifies suspicious execution patterns, writable-path activity, reverse-shell behavior, temporary web servers, and mining indicators.
+# Suspicious Processes
+
+## Cell 7 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -338,9 +342,11 @@ WHERE TempExecution
 ORDER BY Fqdn
 ```
 
-## Cell 4 — Suspicious Services
+## Cell 8 (markdown)
 
-Identifies suspicious systemd services using threat-associated names, high-risk descriptions, and controlled lab indicators.
+# Suspicious Services
+
+## Cell 9 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -465,9 +471,11 @@ WHERE KnownLabName
 ORDER BY Fqdn
 ```
 
-## Cell 5 — Suspicious Network Activity
+## Cell 10 (markdown)
 
-Correlates sockets with process context to identify command-execution utilities, writable-path processes, unusual listeners, and suspicious connections.
+# Suspicious Network Activity
+
+## Cell 11 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -770,9 +778,11 @@ WHERE CommandExecutionSocket
 ORDER BY Fqdn
 ```
 
-## Cell 6 — Suspicious Cron Jobs
+## Cell 12 (markdown)
 
-Classifies scheduled tasks that fetch remote content, execute from writable locations, use inline interpreters, or contain shell-execution patterns.
+# Suspicious Cron Jobs
+
+## Cell 13 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
@@ -1222,52 +1232,641 @@ WHERE CriticalCommand
 ORDER BY Fqdn
 ```
 
-## Cell 7 — Master Risk Score
+## Cell 14 (markdown)
 
-Calculates one explainable, coverage-aware risk score per client while keeping collection health separate from suspicious findings.
+## Administrative Process Review
+
+## Cell 15 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
 
--- TRUE for the presentation lab. Set to FALSE in production.
-LET EnableLabIndicators <= TRUE
-
-
--- ============================================================
--- 1. Fleet coverage
--- ============================================================
-
-LET Fleet <=
+LET ProcessFields <=
 SELECT ClientId,
        Fqdn,
-       "Coverage" AS Category,
-       "Baseline successfully collected" AS Indicator,
-       0 AS Weight,
-       0 AS EvidenceCount,
-       1 AS SourceCollected
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Pid")
+         ||
+         get(item=scope(), member="PID")
+       )) AS ProcPid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Ppid")
+         ||
+         get(item=scope(), member="PPid")
+         ||
+         get(item=scope(), member="PPID")
+       )) AS ProcPpid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="ProcessName")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Exe")
+         ||
+         get(item=scope(), member="Executable")
+         ||
+         get(item=scope(), member="Path")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=scope(), member="CommandLine")
+         ||
+         get(item=scope(), member="Cmdline")
+         ||
+         get(item=scope(), member="cmdline")
+         ||
+         get(item=scope(), member="Command")
+       )) AS ProcCommandLine
 FROM hunt_results(
   hunt_id=HuntId,
-  artifact="LTH.SystemBaseline/Client_BasicInformation"
+  artifact="LTH.SystemBaseline/Processes"
 )
-GROUP BY ClientId
 
 
--- ============================================================
--- 2. Additional UID 0 accounts
--- ============================================================
+LET AdminProcessSignals <= SELECT *,
+  ProcName =~ '''(?i)^ssh$''' AS RemoteClient,
+  ProcName =~ '''(?i)^(scp|sftp|rsync|rclone)$''' AS TransferTool,
+  ProcName =~ '''(?i)^(curl|wget)$''' AS FetchTool,
+  ProcName =~ '''(?i)^(nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS NetworkUtility,
+  (ProcUsername="root" AND ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS RootShell,
+  ProcName =~ '''(?i)^(sudo|su|doas)$''' AS PrivilegeUtility,
+  ProcCommandLine =~ '''(?i)(^|\s|/)(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)''' AS InlineCode,
+  (ProcName =~ '''(?i)^(screen|tmux|nohup)$'''
+   OR ProcCommandLine =~ '''(?i)^\s*(sudo\s+)?nohup\s''') AS BackgroundSession,
+  ProcExe =~ '''^/(usr/local|opt|srv|home|root|mnt|media)/''' AS ApplicationPathExe,
+  (ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|php[0-9.]*|ruby)$'''
+   AND ProcCommandLine =~ '''\s/(usr/local|opt|srv|home|root|mnt|media)/[^\s;&|]+''') AS InterpreterPathReference
+FROM ProcessFields
+
+LET AdministrativeProcessLeads <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "review_administrative_process" AS SignalId,
+  "Administrative, application-path or interpreter process to validate" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=RootShell OR PrivilegeUtility OR InlineCode OR TransferTool OR RemoteClient,then=2,else=1) AS ReviewPriority,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Name=ProcName,Username=ProcUsername,FlowId=RowFlowId) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(RemoteClient=RemoteClient,TransferTool=TransferTool,FetchTool=FetchTool,NetworkUtility=NetworkUtility,
+    RootShell=RootShell,PrivilegeUtility=PrivilegeUtility,InlineCode=InlineCode,BackgroundSession=BackgroundSession,
+    ApplicationPathExe=ApplicationPathExe,InterpreterPathReference=InterpreterPathReference) AS Evidence4,
+  format(format="%v|%v|review_process|%v|%v|%v",args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this observed command, account, path and peer fit the approved administration or application workflow?" AS Hypothesis,
+  "Identify the process owner and approved task; read parent and network context; validate the script or binary when needed" AS SuggestedChecks,
+  "Current process snapshot only. Root shell is not proof of an interactive session; an interpreter argument may reference data rather than executed code" AS ObservationLimit,
+  "LTH - 04 / LTH - 03 / LTH - 05" AS RecommendedNotebook
+FROM AdminProcessSignals
+WHERE RemoteClient OR TransferTool OR FetchTool OR NetworkUtility OR RootShell OR PrivilegeUtility
+   OR InlineCode OR BackgroundSession OR ApplicationPathExe OR InterpreterPathReference
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,Indicator,FindingWeight AS Weight,ReviewPriority,
+  "Hunt Lead" AS EvidenceKind,"Unreviewed" AS ReviewState,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM AdministrativeProcessLeads GROUP BY EvidenceKey
+ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 16 (markdown)
+
+## Accounts and Scheduled Work Review
+
+## Cell 17 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
 
 LET UserFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="Uid")) AS UserUid,
-       str(str=(
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
          get(item=scope(), member="Name")
          ||
          get(item=scope(), member="User")
          ||
          get(item=scope(), member="Username")
        )) AS UserName,
-       str(str=(
+       TextOrEmpty(X=(
+         get(item=scope(), member="Homedir")
+         ||
+         get(item=scope(), member="HomeDir")
+         ||
+         get(item=scope(), member="Home")
+       )) AS HomeDir
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Users"
+)
+
+LET CronFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Crontab"
+)
+
+
+LET CronResults <=
+SELECT ClientId,
+       Fqdn,
+       CronUser,
+       CronEvent,
+       Minute,
+       Hour,
+       DayOfMonth,
+       Month,
+       DayOfWeek,
+       CronPath,
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
+FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
+
+LET CronScriptFiles <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=get(item=scope(),field="OSPath")) AS ScriptPath,
+  TextOrEmpty(X=get(item=scope(),field="Content")) AS ScriptContent,
+  get(item=scope(),field="Mtime") AS ScriptMtime,
+  get(item=scope(),field="FileSize") AS ScriptFileSize,
+  get(item=scope(),field="ContentLimit") AS ScriptContentLimit,
+  get(item=scope(),field="PotentiallyTruncated") AS ScriptPotentiallyTruncated
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Crontab")
+WHERE ScriptPath!="" AND ScriptContent!=""
+
+
+LET ReviewAccountSignals <= SELECT *,
+  (UserUid!="0" AND UserUid!="" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS NonRootShellAccount,
+  (UserUid!="0" AND UserUid!="" AND HomeDir =~ '''^/(root|opt|srv)(/|$)''') AS ApplicationHomeAccount
+FROM UserFields
+LET ReviewAccountLeads <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "review_account_role" AS SignalId,"Account shell or application home requires role confirmation" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,dict(Shell=UserShell,Home=HomeDir) AS Evidence3,
+  dict(NonRootShellAccount=NonRootShellAccount,ApplicationHomeAccount=ApplicationHomeAccount) AS Evidence4,
+  format(format="%v|review_account|%v|%v|%v|%v",args=[ClientId,UserName,UserUid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this account, shell and home required by a named person or application?" AS Hypothesis,
+  "Identify the account owner and intended role; request authentication or group evidence only if the hypothesis requires it" AS SuggestedChecks,
+  "Passwd snapshot: configured shell is not proof of login, and primary GID is not supplementary group membership" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook
+FROM ReviewAccountSignals WHERE NonRootShellAccount OR ApplicationHomeAccount
+
+LET ScheduledTaskLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_scheduled_command" AS SignalId,"Scheduled command for administrative-workflow review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=CronUser="root" OR CronEvent="@reboot" OR (Minute IN ("*","*/1") AND Hour="*"),then=2,else=1) AS ReviewPriority,
+  CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParserVersion=CronParserVersion,ParseStatus=CronParseStatus) AS Evidence4,
+  format(format="%v|review_cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,CronPath,CronUser,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this scheduled command, execution account and frequency belong to an approved job?" AS Hypothesis,
+  "Identify the job owner; validate its script and destination; use execution logs if proof of a run is needed" AS SuggestedChecks,
+  "Shows every nonempty parsed command, including legitimate maintenance. Legacy cron parsing may have lost the real command or user" AS ObservationLimit,
+  "LTH - 06 / LTH - 04" AS RecommendedNotebook
+FROM CronResults
+
+LET ScheduledScriptLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_cron_script" AS SignalId,"Periodic cron script content for purpose and ownership review" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ScriptPath AS Evidence1,ScriptContent AS Evidence2,
+  ScriptMtime AS Evidence3,dict(FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated) AS Evidence4,
+  format(format="%v|review_cron_script|%v|%v",args=[ClientId,ScriptPath,ScriptContent]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script expected in a periodic cron directory, and is it actually invoked by the configured scheduler?" AS Hypothesis,
+  "Review the collected content and owner; confirm run-parts eligibility and scheduler configuration if execution matters" AS SuggestedChecks,
+  "Only a collected content prefix; placement and Mtime do not prove execution or identify the modifier" AS ObservationLimit,
+  "LTH - 06" AS RecommendedNotebook
+FROM CronScriptFiles
+
+LET AccountScheduledLeads <= SELECT * FROM chain(accounts=ReviewAccountLeads,commands=ScheduledTaskLeads,scripts=ScheduledScriptLeads)
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,Indicator,FindingWeight AS Weight,ReviewPriority,
+  "Hunt Lead" AS EvidenceKind,"Unreviewed" AS ReviewState,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM AccountScheduledLeads GROUP BY EvidenceKey
+ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 18 (markdown)
+
+## Listeners and Administrative Peers
+
+## Cell 19 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+
+
+-- Edit to include your actual internal networks, including internally routed public ranges.
+-- A peer outside this list is not automatically Internet traffic or malicious.
+LET ReviewInternalCIDRs <= split(string="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",sep=",")
+LET NetworkFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(),field="CallChain")) AS RawCallChain,
+       TextOrEmpty(X=get(item=scope(), member="Laddr")) AS Laddr,
+       TextOrEmpty(X=get(item=scope(), member="Lport")) AS Lport,
+       TextOrEmpty(X=get(item=scope(), member="Raddr")) AS Raddr,
+       TextOrEmpty(X=get(item=scope(), member="Rport")) AS Rport,
+       TextOrEmpty(X=get(item=scope(), member="Pid")) AS Pid,
+       TextOrEmpty(X=get(item=scope(), member="Status")) AS ConnStatus,
+       get(item=scope(), member="ProcInfo") AS ProcInfo
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/NetworkConnections"
+)
+
+
+LET NetworkResults <=
+SELECT ClientId,
+       Fqdn,
+       Laddr,
+       Lport,
+       Raddr,
+       Rport,
+       Pid,
+       ConnStatus,
+       RawCallChain AS CallChain,
+       TextOrEmpty(X=get(item=ProcInfo,field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Name")
+         ||
+         get(item=ProcInfo, member="name")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Exe")
+         ||
+         get(item=ProcInfo, member="exe")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="CommandLine")
+         ||
+         get(item=ProcInfo, member="cmdline")
+       )) AS ProcCommandLine
+FROM NetworkFields
+
+
+LET ReviewNetworkFields <= SELECT *,
+  regex_replace(source=Laddr,re='''^\[|\]$''',replace="") AS ReviewLocalIP,
+  regex_replace(source=Raddr,re='''^\[|\]$''',replace="") AS ReviewPeerIP,
+  ConnStatus =~ '''(?i)^LISTEN(ING)?$''' AS ReviewListening,
+  ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$''' AS ReviewEstablished,
+  ProcName =~ '''(?i)^(ssh|scp|sftp|rsync|rclone|curl|wget|nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS ReviewAdministrativeTool
+FROM NetworkResults
+LET ReviewNetworkSignals <= SELECT *,
+  (ReviewListening AND cidr_contains(ip=ReviewLocalIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewLocalIP,ranges=["127.0.0.0/8","::1/128"])) AS NonLoopbackListener,
+  (ReviewEstablished AND ReviewAdministrativeTool
+    AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["127.0.0.0/8","::1/128","0.0.0.0/8","::/128"])) AS AdministrativeConnection,
+  (ReviewEstablished AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","224.0.0.0/4","240.0.0.0/4","::/128","::1/128","fe80::/10","ff00::/8"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=ReviewInternalCIDRs)) AS PeerOutsideConfiguredNetworks
+FROM ReviewNetworkFields
+LET NetworkReviewLeads <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "review_socket_role" AS SignalId,"Listener or established peer for role and administration review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=AdministrativeConnection OR PeerOutsideConfiguredNetworks,then=2,else=1) AS ReviewPriority,
+  dict(Pid=Pid,Name=ProcName,Username=ProcUsername) AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,CallChain=CallChain,
+    NonLoopbackListener=NonLoopbackListener,AdministrativeConnection=AdministrativeConnection,
+    PeerOutsideConfiguredNetworks=PeerOutsideConfiguredNetworks) AS Evidence4,
+  format(format="%v|review_socket|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,Pid,Laddr,Lport,Raddr,Rport,ConnStatus,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this process need this listening address or peer for its approved service or administrative task?" AS Hypothesis,
+  "Identify service and destination owners; confirm intended exposure and peer; correlate with the process and approved task" AS SuggestedChecks,
+  "Established sockets do not establish initiation direction. Wildcard listening does not prove Internet reachability; configured CIDRs are not a reputation check" AS ObservationLimit,
+  "LTH - 05 / LTH - 04" AS RecommendedNotebook
+FROM ReviewNetworkSignals
+WHERE NonLoopbackListener OR AdministrativeConnection OR PeerOutsideConfiguredNetworks
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,Indicator,FindingWeight AS Weight,ReviewPriority,
+  "Hunt Lead" AS EvidenceKind,"Unreviewed" AS ReviewState,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM NetworkReviewLeads GROUP BY EvidenceKey
+ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 20 (markdown)
+
+## Baseline Prevalence Review
+
+## Cell 21 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+
+
+LET ReviewMinCohortHosts <= 4
+LET ReviewMaxRareHosts <= 2
+LET ReviewMaxRarePercent <= 25
+LET UserFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="User")
+         ||
+         get(item=scope(), member="Username")
+       )) AS UserName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Homedir")
+         ||
+         get(item=scope(), member="HomeDir")
+         ||
+         get(item=scope(), member="Home")
+       )) AS HomeDir
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Users"
+)
+
+LET ProcessFields <=
+SELECT ClientId,
+       Fqdn,
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Pid")
+         ||
+         get(item=scope(), member="PID")
+       )) AS ProcPid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Ppid")
+         ||
+         get(item=scope(), member="PPid")
+         ||
+         get(item=scope(), member="PPID")
+       )) AS ProcPpid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="ProcessName")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Exe")
+         ||
+         get(item=scope(), member="Executable")
+         ||
+         get(item=scope(), member="Path")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=scope(), member="CommandLine")
+         ||
+         get(item=scope(), member="Cmdline")
+         ||
+         get(item=scope(), member="cmdline")
+         ||
+         get(item=scope(), member="Command")
+       )) AS ProcCommandLine
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Processes"
+)
+
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
+
+LET CronFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Crontab"
+)
+
+
+LET CronResults <=
+SELECT ClientId,
+       Fqdn,
+       CronUser,
+       CronEvent,
+       Minute,
+       Hour,
+       DayOfMonth,
+       Month,
+       DayOfWeek,
+       CronPath,
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
+FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
+
+
+LET ReviewPlatforms <= SELECT ClientId,
+  (TextOrEmpty(X=get(item=scope(),field="Platform")) || "Unknown") AS ReviewCohort
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET ReviewPlatformIndex <= memoize(query={SELECT * FROM ReviewPlatforms},key="ClientId")
+
+-- Denominator is distinct clients that returned usable rows for this source,
+-- not all 16 scoped clients when some source results are missing.
+LET ReviewSourceClients <= SELECT * FROM chain(
+  processes={SELECT ClientId,"Process executable" AS Family FROM ProcessFields WHERE ProcExe!="" GROUP BY ClientId},
+  services={SELECT ClientId,"Service unit" AS Family FROM ServiceFields WHERE ServiceUnit!="" GROUP BY ClientId},
+  users={SELECT ClientId,"Shell account" AS Family FROM UserFields WHERE UserName!="" GROUP BY ClientId},
+  cron={SELECT ClientId,"Cron command" AS Family FROM CronResults GROUP BY ClientId}
+)
+LET ReviewSourceCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewSourceClients
+LET ReviewCoverage <= SELECT Family,ReviewCohort,count() AS CoveredHosts,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewSourceCohorts GROUP BY CohortKey
+LET ReviewCoverageIndex <= memoize(query={SELECT * FROM ReviewCoverage},key="CohortKey")
+
+LET ReviewObservations <= SELECT * FROM chain(
+  processes={SELECT ClientId,Fqdn,"Processes" AS Category,"Process executable" AS Family,
+    regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS Entity,
+    "LTH.SystemBaseline/Processes" AS ObservationSource FROM ProcessFields WHERE ProcExe!=""},
+  services={SELECT ClientId,Fqdn,"Services and Persistence" AS Category,"Service unit" AS Family,
+    ServiceUnit AS Entity,"LTH.SystemBaseline/Services" AS ObservationSource FROM ServiceFields WHERE ServiceUnit!=""},
+  users={SELECT ClientId,Fqdn,"Users and Privileges" AS Category,"Shell account" AS Family,
+    UserName+"|"+UserShell AS Entity,"LTH.SystemBaseline/Users" AS ObservationSource
+    FROM UserFields WHERE UserUid!="0" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$'''},
+  cron={SELECT ClientId,Fqdn,"Persistence" AS Category,"Cron command" AS Family,
+    CronUser+"|"+CronCommand AS Entity,"LTH.SystemBaseline/Crontab" AS ObservationSource FROM CronResults}
+)
+LET ReviewObservedCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewObservations
+LET ReviewUniqueHostEntities <= SELECT *,
+  format(format="%v|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS HostEntityKey,
+  format(format="%v|%v|%v",args=[ReviewCohort,Family,Entity]) AS PrevalenceKey,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewObservedCohorts GROUP BY HostEntityKey
+LET ReviewPrevalence <= SELECT PrevalenceKey,count() AS HostsWithEntity
+FROM ReviewUniqueHostEntities GROUP BY PrevalenceKey
+LET ReviewPrevalenceIndex <= memoize(query={SELECT * FROM ReviewPrevalence},key="PrevalenceKey")
+LET ReviewPrevalenceRows <= SELECT *,
+  get(item=ReviewCoverageIndex,field=CohortKey).CoveredHosts AS CoveredHosts,
+  get(item=ReviewPrevalenceIndex,field=PrevalenceKey).HostsWithEntity AS HostsWithEntity
+FROM ReviewUniqueHostEntities
+LET RareBaselineLeads <= SELECT ClientId,Fqdn,Category,
+  "review_low_prevalence" AS SignalId,"Low-prevalence baseline entity in the observed platform cohort" AS Indicator,
+  0 AS FindingWeight,2 AS ReviewPriority,Family AS Evidence1,Entity AS Evidence2,
+  dict(PlatformCohort=ReviewCohort,HostsWithEntity=HostsWithEntity,CoveredHosts=CoveredHosts) AS Evidence3,
+  "Compare approved roles before treating rarity as an anomaly; do not interpret as newly created" AS Evidence4,
+  format(format="%v|review_prevalence|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS EvidenceKey,
+  ObservationSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this uncommon executable, unit, account or scheduled command explained by this host's approved role?" AS Hypothesis,
+  "Compare with hosts having the same business role; identify owner and deployment purpose; inspect related baseline evidence" AS SuggestedChecks,
+  "One-Hunt prevalence among clients with source rows. Platform is not a business-role cohort; exact cron commands may contain host-specific values" AS ObservationLimit,
+  "LTH - 01 / the notebook for the observed family" AS RecommendedNotebook
+FROM ReviewPrevalenceRows
+WHERE ReviewCohort!="Unknown" AND CoveredHosts>=ReviewMinCohortHosts
+  AND HostsWithEntity<=ReviewMaxRareHosts
+  AND (HostsWithEntity * 100)<= (CoveredHosts * ReviewMaxRarePercent)
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,Indicator,FindingWeight AS Weight,ReviewPriority,
+  "Hunt Lead" AS EvidenceKind,"Unreviewed" AS ReviewState,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM RareBaselineLeads GROUP BY EvidenceKey
+ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 22 (markdown)
+
+## Active Service Role Review
+
+## Cell 23 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
+
+
+LET ReviewServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(ssh|sshd|xrdp|xrdp-sesman|vncserver|tigervnc|telnet|rsh)([-.@][^ ]*)?\.service$''' AS RemoteAccessService,
+  ServiceUnit =~ '''(?i)^(docker|containerd|crio|cri-o|podman|kubelet)([-.@][^ ]*)?\.service$''' AS ContainerService,
+  ServiceUnit =~ '''(?i)^(nginx|apache2|httpd|mysql|mysqld|mariadb|postgresql|postgres|redis|redis-server|mongod|mongodb|elasticsearch)([-.@][^ ]*)?\.service$''' AS ApplicationDataService,
+  ServiceUnit =~ '''(?i)^(nfs|nfs-server|rpcbind|smb|smbd|nmb|nmbd|vsftpd|proftpd|pure-ftpd)([-.@][^ ]*)?\.service$''' AS FileSharingService
+FROM ServiceFields
+LET ActiveServiceLeads <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "review_active_service_role" AS SignalId,"Active access, application, container or file-sharing service" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(RemoteAccessService=RemoteAccessService,ContainerService=ContainerService,
+    ApplicationDataService=ApplicationDataService,FileSharingService=FileSharingService) AS Evidence4,
+  format(format="%v|review_service|%v|%v|%v",args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this active service required for the host role and is its access or data exposure intended?" AS Hypothesis,
+  "Confirm the service owner and purpose; inspect related listeners; collect unit configuration only for the selected hypothesis" AS SuggestedChecks,
+  "Observed loaded service state and naming only; no ExecStart, enablement, installed-package ownership or exposure proof" AS ObservationLimit,
+  "LTH - 04 / LTH - 05 / LTH - 12" AS RecommendedNotebook
+FROM ReviewServiceSignals
+WHERE ServiceLoad="loaded" AND ServiceActive="active"
+  AND (RemoteAccessService OR ContainerService OR ApplicationDataService OR FileSharingService)
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,Indicator,FindingWeight AS Weight,ReviewPriority,
+  "Hunt Lead" AS EvidenceKind,"Unreviewed" AS ReviewState,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM ActiveServiceLeads GROUP BY EvidenceKey
+ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 24 (markdown)
+
+## Hunt Starting Points
+
+## Cell 25 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+-- Keep this FALSE on the production server, consistently in all cells.
+LET EnableLabIndicators <= FALSE
+
+
+LET Fleet <= SELECT ClientId,Fqdn,"Coverage" AS Category,"Basic information source returned rows" AS Indicator,
+  0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET UserFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="User")
+         ||
+         get(item=scope(), member="Username")
+       )) AS UserName,
+       TextOrEmpty(X=(
          get(item=scope(), member="Homedir")
          ||
          get(item=scope(), member="HomeDir")
@@ -1295,69 +1894,39 @@ WHERE UserUid = "0"
     AND HomeDir = "/root"
   )
 
-
-LET UniqueUsers <=
-SELECT ClientId,
-       Fqdn,
-       UserName,
-       HomeDir,
-       FindingWeight
-FROM UserMatches
-GROUP BY EvidenceKey
-
-
-LET UsersByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount
-FROM UniqueUsers
-GROUP BY ClientId
-
-
-LET SuspiciousUsers <=
-SELECT ClientId,
-       Fqdn,
-       "Users and Privileges" AS Category,
-       "Additional UID 0 account" AS Indicator,
-       5 AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM UsersByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 3. Suspicious processes
--- ============================================================
-
 LET ProcessFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=(
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
          get(item=scope(), member="Pid")
          ||
          get(item=scope(), member="PID")
        )) AS ProcPid,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Ppid")
          ||
          get(item=scope(), member="PPid")
          ||
          get(item=scope(), member="PPID")
        )) AS ProcPpid,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Name")
          ||
          get(item=scope(), member="ProcessName")
        )) AS ProcName,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Exe")
          ||
          get(item=scope(), member="Executable")
          ||
          get(item=scope(), member="Path")
        )) AS ProcExe,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="CommandLine")
          ||
          get(item=scope(), member="Cmdline")
@@ -1422,7 +1991,10 @@ SELECT *,
 
        ProcCommandLine =~
          '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
-         AS PythonHTTPServer
+         AS PythonHTTPServer,
+       ProcExe =~ '''(?i)^/run/user/[0-9]+/''' AS UserRuntimeExecution,
+       (ProcName =~ '''(?i)^(xmrig|minerd|kinsing|kdevtmpfsi)$'''
+        OR ProcCommandLine =~ '''(?i)(xmrig|stratum\+tcp)''') AS MiningPattern
 FROM ProcessFields
 
 
@@ -1442,11 +2014,14 @@ SELECT *,
          then=5,
          else=if(
            condition=WritablePathExe
-                     OR WritablePathExecution,
+                     OR WritablePathExecution
+                     OR MiningPattern
+                     OR (UserRuntimeExecution AND PythonHTTPServer),
            then=4,
            else=if(
              condition=NetcatTool
-                       OR SocatTool,
+                       OR SocatTool
+                       OR UserRuntimeExecution,
              then=3,
              else=2
            )
@@ -1463,216 +2038,40 @@ WHERE DownloadPipeShell
    OR NetcatTool
    OR SocatTool
    OR PythonHTTPServer
+   OR UserRuntimeExecution
+   OR MiningPattern
 
 
-LET UniqueProcesses <=
-SELECT ClientId,
-       Fqdn,
-       ProcPid,
-       ProcName,
-       ProcExe,
-       ProcCommandLine,
-       FindingWeight
-FROM ProcessMatches
-GROUP BY EvidenceKey
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
 
-
-LET ProcessesByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
-         )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 2,
-           then=1,
-           else=0
-         )
-       ) AS LowCount
-FROM UniqueProcesses
-GROUP BY ClientId
-
-
-LET SuspiciousProcesses <=
-SELECT ClientId,
-       Fqdn,
-       "Processes" AS Category,
-       "Suspicious process behavior" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM ProcessesByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 4. Suspicious systemd services
--- ============================================================
-
-LET ServiceFields <=
-SELECT ClientId,
-       Fqdn,
-       str(str=(
-         get(item=scope(), member="Unit")
-         ||
-         get(item=scope(), member="Name")
-         ||
-         get(item=scope(), member="Service")
-       )) AS ServiceUnit,
-       str(str=get(item=scope(), member="Description"))
-         AS ServiceDescription,
-       str(str=(
-         get(item=scope(), member="ExecStart")
-         ||
-         get(item=scope(), member="Command")
-         ||
-         get(item=scope(), member="CommandLine")
-       )) AS ServiceCommand,
-       str(str=(
-         get(item=scope(), member="FragmentPath")
-         ||
-         get(item=scope(), member="SourcePath")
-         ||
-         get(item=scope(), member="Path")
-       )) AS ServicePath
-FROM hunt_results(
-  hunt_id=HuntId,
-  artifact="LTH.SystemBaseline/Services"
-)
-
-
-LET ServiceSignals <=
-SELECT *,
-       ServiceCommand =~
-         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
-         AS DownloadPipeShell,
-
-       (
-         ServiceCommand =~
-           '''(?i)(^|\s)/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         ServicePath =~
-           '''(?i)^/(tmp|var/tmp|dev/shm)/'''
-       ) AS WritableServiceExecution,
-
-       (
-         EnableLabIndicators
-         AND
-         (
-           ServiceUnit =~
-             '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
-           OR
-           ServiceDescription =~
-             '''(?i)(lab persistence|temporary update service|remote support lab)'''
-         )
-       ) AS KnownLabService
+LET ServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(kinsing|xmrig|kdevtmpfsi|watchbog)([-_.@][a-z0-9_.@-]+)?\.service$''' AS ThreatAssociatedName,
+  ServiceDescription =~ '''(?i)(cryptocurrency[ -](miner|mining)|reverse[ -]shell|backdoor[ -]service|unauthorized[ -]remote[ -]access)''' AS HighRiskDescription,
+  (EnableLabIndicators AND
+   (ServiceUnit =~ '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
+    OR ServiceDescription =~ '''(?i)(lab persistence|temporary update service|remote support lab)''')) AS KnownLabService
 FROM ServiceFields
 
-
-LET ServiceMatches <=
-SELECT *,
-       format(
-         format="%v|service|%v|%v|%v",
-         args=[ClientId, ServiceUnit, ServicePath, ServiceCommand]
-       ) AS EvidenceKey,
-       if(
-         condition=DownloadPipeShell,
-         then=5,
-         else=4
-       ) AS FindingWeight
+LET ServiceMatches <= SELECT *,
+  format(format="%v|service|%v|%v|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceDescription,ServiceLoad,ServiceActive,ServiceSub]) AS EvidenceKey,
+  if(condition=ThreatAssociatedName,then=5,else=4) AS FindingWeight
 FROM ServiceSignals
-WHERE DownloadPipeShell
-   OR WritableServiceExecution
-   OR KnownLabService
-
-
-LET UniqueServices <=
-SELECT ClientId,
-       Fqdn,
-       ServiceUnit,
-       ServicePath,
-       ServiceCommand,
-       FindingWeight
-FROM ServiceMatches
-GROUP BY EvidenceKey
-
-
-LET ServicesByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount
-FROM UniqueServices
-GROUP BY ClientId
-
-
-LET SuspiciousServices <=
-SELECT ClientId,
-       Fqdn,
-       "Services and Persistence" AS Category,
-       "Suspicious systemd service" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=4
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM ServicesByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 5. Suspicious network activity
--- ============================================================
+WHERE ThreatAssociatedName OR HighRiskDescription OR KnownLabService
 
 LET NetworkFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="Laddr")) AS Laddr,
-       str(str=get(item=scope(), member="Lport")) AS Lport,
-       str(str=get(item=scope(), member="Raddr")) AS Raddr,
-       str(str=get(item=scope(), member="Rport")) AS Rport,
-       str(str=get(item=scope(), member="Pid")) AS Pid,
-       str(str=get(item=scope(), member="Status")) AS ConnStatus,
+       TextOrEmpty(X=get(item=scope(),field="CallChain")) AS RawCallChain,
+       TextOrEmpty(X=get(item=scope(), member="Laddr")) AS Laddr,
+       TextOrEmpty(X=get(item=scope(), member="Lport")) AS Lport,
+       TextOrEmpty(X=get(item=scope(), member="Raddr")) AS Raddr,
+       TextOrEmpty(X=get(item=scope(), member="Rport")) AS Rport,
+       TextOrEmpty(X=get(item=scope(), member="Pid")) AS Pid,
+       TextOrEmpty(X=get(item=scope(), member="Status")) AS ConnStatus,
        get(item=scope(), member="ProcInfo") AS ProcInfo
 FROM hunt_results(
   hunt_id=HuntId,
@@ -1689,17 +2088,19 @@ SELECT ClientId,
        Rport,
        Pid,
        ConnStatus,
-       str(str=(
+       RawCallChain AS CallChain,
+       TextOrEmpty(X=get(item=ProcInfo,field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="Name")
          ||
          get(item=ProcInfo, member="name")
        )) AS ProcName,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="Exe")
          ||
          get(item=ProcInfo, member="exe")
        )) AS ProcExe,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="CommandLine")
          ||
          get(item=ProcInfo, member="cmdline")
@@ -1841,91 +2242,23 @@ WHERE CommandExecutionSocket
    OR PythonListener
    OR RiskyPortListener
 
-
-LET UniqueNetwork <=
-SELECT ClientId,
-       Fqdn,
-       Pid,
-       Laddr,
-       Lport,
-       Raddr,
-       Rport,
-       ConnStatus,
-       FindingWeight
-FROM NetworkMatches
-GROUP BY EvidenceKey
-
-
-LET NetworkByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
-         )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount
-FROM UniqueNetwork
-GROUP BY ClientId
-
-
-LET SuspiciousNetwork <=
-SELECT ClientId,
-       Fqdn,
-       "Network" AS Category,
-       "Suspicious process and socket behavior" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM NetworkByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 6. Suspicious Cron jobs
--- ============================================================
-
 LET CronFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="User")) AS CronUser,
-       str(str=get(item=scope(), member="Event")) AS CronEvent,
-       str(str=get(item=scope(), member="Minute")) AS Minute,
-       str(str=get(item=scope(), member="Hour")) AS Hour,
-       str(str=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
-       str(str=get(item=scope(), member="Month")) AS Month,
-       str(str=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
-       str(str=get(item=scope(), member="Path")) AS CronPath,
-       str(str=get(item=scope(), member="Command")) AS CommandValue,
-       str(str=get(item=scope(), member="$Query")) AS QueryValue
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/Crontab"
@@ -1943,12 +2276,10 @@ SELECT ClientId,
        Month,
        DayOfWeek,
        CronPath,
-       if(
-         condition=CommandValue,
-         then=CommandValue,
-         else=QueryValue
-       ) AS CronCommand
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
 FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
 
 
 LET CronSignals <=
@@ -1976,37 +2307,16 @@ SELECT *,
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         )
        ) AS DirectWritableExecution,
 
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         )
        ) AS InterpretedWritableExecution,
 
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
-         )
        ) AS InlineInterpreter,
 
        CronCommand =~
@@ -2065,10 +2375,12 @@ FROM ClassifiedCron
 LET CronMatches <=
 SELECT *,
        format(
-         format="%v|cron|%v|%v|%v|%v|%v|%v|%v",
+         format="%v|cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
          args=[
            ClientId,
            CronPath,
+           CronUser,
+           CronEvent,
            Minute,
            Hour,
            DayOfMonth,
@@ -2100,77 +2412,397 @@ WHERE CriticalCommand
    OR ScheduledRemoteFetch
 
 
-LET UniqueCron <=
-SELECT ClientId,
-       Fqdn,
-       CronPath,
-       CronCommand,
-       FindingWeight
+LET UserDetail <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_additional_uid0" AS SignalId,"Additional UID 0 account" AS Indicator,
+  FindingWeight,EvidenceKey,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,HomeDir AS Evidence3,UserShell AS Evidence4,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this additional UID 0 identity authorized for this server?" AS Hypothesis,
+  "Passwd configuration only; no proof of login or privilege use" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook,
+  UserName AS User,UserDescription AS Description,UserUid AS Uid,UserGid AS Gid,
+  HomeDir AS Homedir,UserShell AS Shell
+FROM UserMatches
+
+LET ProcessDetail <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_behavior" AS SignalId,
+  if(condition=DownloadPipeShell,then="Downloaded content piped to a shell",
+    else=if(condition=DecodePipeShell,then="Decoded content piped to a shell",
+      else=if(condition=NetcatExec OR SocatExec OR DevTcpShell,then="Command contains a shell/socket execution pattern",
+        else=if(condition=MiningPattern,then="Mining-related name or command pattern",
+          else=if(condition=WritablePathExe OR WritablePathExecution,then="Execution from a temporary path",
+            else=if(condition=UserRuntimeExecution,then="Execution from a user runtime path",
+              else=if(condition=NetcatTool OR SocatTool,then="Network utility in process command",
+                else="Python HTTP server command"))))))) AS Indicator,
+  FindingWeight,EvidenceKey,dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Name=ProcName,Hash=ProcHash,FlowId=RowFlowId,DownloadPipeShell=DownloadPipeShell,DecodePipeShell=DecodePipeShell,
+    NetcatExec=NetcatExec,SocatExec=SocatExec,DevTcpShell=DevTcpShell,MiningPattern=MiningPattern,
+    WritablePathExe=WritablePathExe,WritablePathExecution=WritablePathExecution,
+    UserRuntimeExecution=UserRuntimeExecution,NetcatTool=NetcatTool,SocatTool=SocatTool,
+    PythonHTTPServer=PythonHTTPServer) AS Evidence4,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate executable origin, server role and whether this command was authorized" AS Hypothesis,
+  "Command/name regex on a process snapshot; not a shell parser or confirmation of compromise" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook,
+  ProcPid AS Pid,ProcPpid AS Ppid,ProcName AS Name,ProcExe AS Exe,ProcCommandLine AS CommandLine,
+  ProcUsername AS Username,ProcHash AS Hash
+FROM ProcessMatches
+
+LET ServiceDetail <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_service_name_description" AS SignalId,
+  if(condition=ThreatAssociatedName,then="Service name matches a threat-associated watchlist",
+    else=if(condition=HighRiskDescription,then="Service description matches suspicious terminology",
+      else="Explicitly enabled lab service indicator")) AS Indicator,
+  FindingWeight,EvidenceKey,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(ThreatAssociatedName=ThreatAssociatedName,HighRiskDescription=HighRiskDescription,KnownLabService=KnownLabService) AS Evidence4,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this service name/description correspond to an unauthorized installed service?" AS Hypothesis,
+  "Only name, description and state are available. Priority weight is not confidence; collect the unit and executable to validate" AS ObservationLimit,
+  "LTH - 04 / LTH - 06" AS RecommendedNotebook,
+  ServiceUnit AS Unit,ServiceDescription AS Description,ServiceLoad AS Load,
+  ServiceActive AS Active,ServiceSub AS Sub
+FROM ServiceMatches
+
+LET NetworkDetail <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "baseline_process_socket" AS SignalId,
+  if(condition=CommandExecutionSocket,then="Socket-owning process has a command execution pattern",
+    else=if(condition=WritablePathSocket,then="Active socket with temporary-path execution context",
+      else=if(condition=NetworkToolListener OR NetworkToolConnection,then="Network utility listener or connection",
+        else=if(condition=PythonListener,then="Python HTTP listener",else="Non-loopback listener on a configured review port")))) AS Indicator,
+  FindingWeight,EvidenceKey,Pid AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,
+    Username=ProcUsername,CallChain=CallChain,
+    CommandExecutionSocket=CommandExecutionSocket,WritablePathSocket=WritablePathSocket,
+    NetworkToolListener=NetworkToolListener,NetworkToolConnection=NetworkToolConnection,
+    PythonListener=PythonListener,RiskyPortListener=RiskyPortListener) AS Evidence4,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this socket, associated command and peer expected for this host role?" AS Hypothesis,
+  "Socket snapshot; a port number does not identify a protocol or prove command-and-control" AS ObservationLimit,
+  "LTH - 05 - Network Connections Dashboard" AS RecommendedNotebook,
+  Laddr,Lport,Raddr,Rport,Pid,ConnStatus AS Status,ProcName,ProcExe,ProcCommandLine,ProcUsername,CallChain
+FROM NetworkMatches
+
+LET CronDetail <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_command" AS SignalId,
+  if(condition=CriticalCommand,then="Cron declares a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron declares execution from a temporary path",
+      else=if(condition=RepeatedRemoteFetch,then="Cron declares remote fetch at reboot or every minute",
+        else=if(condition=InlineInterpreter,then="Cron declares inline interpreter code",else="Cron declares remote fetch")))) AS Indicator,
+  FindingWeight,EvidenceKey,CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParseStatus=CronParseStatus,ParserVersion=CronParserVersion,
+    CriticalCommand=CriticalCommand,WritablePathExecution=WritablePathExecution,
+    RepeatedRemoteFetch=RepeatedRemoteFetch,InlineInterpreter=InlineInterpreter,ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this scheduled command authorized and is there separate evidence it executed?" AS Hypothesis,
+  "Declared command only; legacy parser rows may be incomplete. No cron runtime or complete shell semantics" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook,
+  CronUser,CronPath,CronCommand,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek
 FROM CronMatches
-GROUP BY EvidenceKey
+
+LET AccountSignals <= SELECT *,
+  UserShell =~ '''^/(tmp|var/tmp|dev/shm)/''' AS TemporaryShell,
+  (UserName="root" AND HomeDir =~ '''^/(tmp|var/tmp|dev/shm)/''') AS TemporaryRootHome,
+  (UserGid="0" AND UserUid!="0" AND UserUid!="") AS PrimaryRootGroup,
+  (UserName =~ '''^(www-data|apache|nginx|mysql|mariadb|postgres|redis|memcached|nobody)$'''
+   AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS ServiceInteractiveShell
+FROM UserFields
+
+LET AccountMatches <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_account_configuration" AS SignalId,
+  if(condition=TemporaryShell,then="Account declares a shell under a temporary directory",
+    else=if(condition=TemporaryRootHome,then="Root account declares a temporary home directory",
+      else=if(condition=PrimaryRootGroup,then="Non-root UID has primary GID 0",
+        else="Named service account has an interactive shell"))) AS Indicator,
+  if(condition=TemporaryShell,then=4,else=if(condition=TemporaryRootHome,then=3,else=2)) AS FindingWeight,
+  UserName AS Evidence1,dict(Uid=UserUid,Gid=UserGid) AS Evidence2,
+  UserShell AS Evidence3,dict(Home=HomeDir,TemporaryShell=TemporaryShell,
+    TemporaryRootHome=TemporaryRootHome,PrimaryRootGroup=PrimaryRootGroup,
+    ServiceInteractiveShell=ServiceInteractiveShell) AS Evidence4,
+  format(format="%v|account_config|%v|%v|%v|%v|%v",
+    args=[ClientId,UserName,UserUid,UserGid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate account role and whether this shell, group or home was authorized" AS Hypothesis,
+  "Configuration snapshot; does not establish a login or privilege use" AS ObservationLimit,
+  "LTH - 02 - Users Groups and Privileges Dashboard" AS RecommendedNotebook
+FROM AccountSignals
+WHERE TemporaryShell OR TemporaryRootHome OR PrimaryRootGroup OR ServiceInteractiveShell
+
+LET ProcessExtraFields <= SELECT *,
+  format(format="%v|%v|%v",args=[ClientId,RowFlowId,ProcPid]) AS ProcessLookupKey,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS CleanExe,
+  (ProcDeleted=TRUE OR ProcExe =~ '''\(deleted\)$''') AS IsDeleted,
+  ProcExe =~ '''^/?memfd:''' AS IsMemfd
+FROM ProcessFields
+
+LET ProcessIndex <= memoize(query={SELECT * FROM ProcessExtraFields},key="ProcessLookupKey")
+LET ProcessWithParent <= SELECT *,
+  get(item=ProcessIndex,field=format(format="%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPpid])) AS ParentProcess
+FROM ProcessExtraFields
+
+LET NewProcessSignals <= SELECT *,
+  (ParentProcess.ProcName =~ '''^(nginx|apache2|httpd|php-fpm[0-9.]*|uwsgi|gunicorn[0-9.: -]*)$'''
+   AND CleanExe =~ '''/(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|php[0-9.]*)$'''
+   AND ProcPpid!="0" AND ProcPpid!="") AS WebServiceChild,
+  (CleanExe =~ '''/ssh$'''
+   AND ProcCommandLine =~ '''(^|\s)(-(R|D)(\s|[0-9*\[:/])|-o\s*(RemoteForward|DynamicForward)\s*=)''') AS SSHForwarding
+FROM ProcessWithParent
+
+LET ExtraProcessMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_context" AS SignalId,
+  if(condition=IsMemfd,then="Process executable is backed by memfd",
+    else=if(condition=WebServiceChild,then="Shell or interpreter has a web-service parent in this snapshot",
+      else=if(condition=SSHForwarding,then="SSH process declares remote or dynamic forwarding",
+        else="Process executable is marked deleted"))) AS Indicator,
+  if(condition=IsMemfd,then=4,else=if(condition=WebServiceChild,then=3,else=2)) AS FindingWeight,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername,CreatedTime=ProcCreatedTime) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Deleted=IsDeleted,Memfd=IsMemfd,SSHForwarding=SSHForwarding,
+    WebServiceChild=WebServiceChild,ParentName=ParentProcess.ProcName,
+    ParentExe=ParentProcess.ProcExe,ParentCommandLine=ParentProcess.ProcCommandLine,
+    FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|process_context|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the executable, parent application behavior and authorized forwarding or updates" AS Hypothesis,
+  "Snapshot correlation; not historical process-creation evidence. Deleted binaries can follow normal updates" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook
+FROM NewProcessSignals
+WHERE IsMemfd OR WebServiceChild OR SSHForwarding OR IsDeleted
+
+LET CronScriptFiles <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=get(item=scope(),field="OSPath")) AS ScriptPath,
+  TextOrEmpty(X=get(item=scope(),field="Content")) AS ScriptContent,
+  get(item=scope(),field="Mtime") AS ScriptMtime,
+  get(item=scope(),field="FileSize") AS ScriptFileSize,
+  get(item=scope(),field="ContentLimit") AS ScriptContentLimit,
+  get(item=scope(),field="PotentiallyTruncated") AS ScriptPotentiallyTruncated
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Crontab")
+WHERE ScriptPath!="" AND ScriptContent!=""
+
+LET ScriptResults <= SELECT * FROM foreach(row=CronScriptFiles,query={
+  SELECT ClientId,Fqdn,ScriptPath,ScriptMtime,ScriptFileSize,ScriptContentLimit,ScriptPotentiallyTruncated,
+    _value AS CronCommand,(_key + 1) AS ScriptLineNumber,"" AS CronEvent,"" AS Minute,"" AS Hour
+  FROM items(item=split(string=ScriptContent,sep="\n"))
+})
+WHERE NOT CronCommand =~ '''^\s*(#|$)'''
+
+LET ScriptSignals <=
+SELECT *,
+       CronCommand =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       CronCommand =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       CronCommand =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
+
+       CronCommand =~
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
+         AS ScheduledRemoteFetch,
+
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
+       (
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM ScriptResults
 
 
-LET CronByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
+LET ClassifiedScript <=
+SELECT *,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
          )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
          )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount
-FROM UniqueCron
-GROUP BY ClientId
+       ) AS RepeatedRemoteFetch
+FROM ScriptSignals
 
 
-LET SuspiciousCron <=
-SELECT ClientId,
-       Fqdn,
-       "Persistence" AS Category,
-       "Suspicious scheduled task" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM CronByHost
-WHERE EvidenceCount > 0
+LET ScoredScript <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedScript
 
 
--- ============================================================
--- 7. Source data coverage
---
--- A source is counted only when it returned at least one row.
--- Missing source rows require validation; they are not treated as
--- proof that the endpoint is clean or that collection failed.
--- ============================================================
 
+LET CronScriptMatches <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_script_content" AS SignalId,
+  if(condition=CriticalCommand,then="Cron script line contains a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron script line declares temporary-path execution",
+      else=if(condition=InlineInterpreter,then="Cron script line declares inline interpreter code",
+        else="Cron script line declares remote fetch"))) AS Indicator,
+  if(condition=CriticalCommand,then=5,else=if(condition=WritablePathExecution,then=4,
+    else=if(condition=InlineInterpreter,then=3,else=2))) AS FindingWeight,
+  ScriptPath AS Evidence1,ScriptLineNumber AS Evidence2,CronCommand AS Evidence3,
+  dict(Mtime=ScriptMtime,FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated,CriticalCommand=CriticalCommand,
+    WritablePathExecution=WritablePathExecution,InlineInterpreter=InlineInterpreter,
+    ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  format(format="%v|cron_script|%v|%v|%v",args=[ClientId,ScriptPath,ScriptLineNumber,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script invoked by cron/run-parts, and is the declared behavior authorized?" AS Hypothesis,
+  "Content prefix and line regex only; comments skipped, but strings/dead code may match. Existence does not prove execution" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook
+FROM ScoredScript
+WHERE CriticalCommand OR WritablePathExecution OR InlineInterpreter OR ScheduledRemoteFetch
+
+LET MountFields <= SELECT ClientId,Fqdn,Device,Mount,FSType,Options,
+  TextOrEmpty(X=(get(item=scope(),field="FlowId") || get(item=scope(),field="_FlowId"))) AS MountFlowId,
+  regex_replace(source=TextOrEmpty(X=Mount),re="/+$",replace="") AS MountPrefix
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Mounts")
+
+-- Resolve the longest matching mount, including normal nested mounts.
+-- Encoded mount paths require decoding before they can be correlated safely.
+LET MountFor(C,F,E) = SELECT *,len(list=MountPrefix) AS PrefixLength
+FROM MountFields
+WHERE ClientId=C AND MountFlowId=F AND TextOrEmpty(X=Mount)!=""
+  AND NOT TextOrEmpty(X=Mount) =~ '''\\[0-7]{3}'''
+  AND (E=MountPrefix OR split(string=E,sep_string=MountPrefix+"/")[0]="")
+ORDER BY PrefixLength DESC LIMIT 1
+
+LET MountProcessPaths <= SELECT *,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS ExecutablePath
+FROM ProcessFields
+WHERE ProcExe =~ '''^/(mnt|media|home|srv|opt|run/user)/'''
+
+LET ExecutableMounts <= SELECT *,
+  MountFor(C=ClientId,F=RowFlowId,E=ExecutablePath)[0] AS BackingMount
+FROM MountProcessPaths
+WHERE NOT ExecutablePath =~ '''[\s\\]'''
+
+LET MountExecutionMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_network_mount_execution" AS SignalId,
+  "Process executable path resolves to a network filesystem in this snapshot" AS Indicator,
+  2 AS FindingWeight,dict(Pid=ProcPid,Ppid=ProcPpid) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Mount=BackingMount.Mount,Device=BackingMount.Device,FSType=BackingMount.FSType,
+    Options=BackingMount.Options,SupportingArtifact="LTH.SystemBaseline/Mounts",FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|mounted_exe|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,BackingMount.Mount]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is executable code on this network share expected for this server role?" AS Hypothesis,
+  "Path-based, non-atomic snapshot correlation; process mount namespaces and mounts may differ" AS ObservationLimit,
+  "LTH - 01 / LTH - 04" AS RecommendedNotebook
+FROM ExecutableMounts
+WHERE BackingMount.FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountContext <= SELECT ClientId,Fqdn,"Mount Review" AS Category,
+  "baseline_network_mount_inventory" AS SignalId,
+  "Network filesystem available for hypothesis review" AS Indicator,
+  0 AS FindingWeight,Mount AS Evidence1,Device AS Evidence2,FSType AS Evidence3,
+  dict(Options=Options,FlowId=MountFlowId) AS Evidence4,
+  format(format="%v|%v|mount_context|%v|%v",args=[ClientId,MountFlowId,Mount,Device]) AS EvidenceKey,
+  "LTH.SystemBaseline/Mounts" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the share owner, purpose and which applications use it" AS Hypothesis,
+  "Mount inventory alone has weight zero and does not establish malicious use" AS ObservationLimit,
+  "LTH - 01 - System Baseline Dashboard" AS RecommendedNotebook
+FROM MountFields WHERE FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountReview <= SELECT * FROM chain(execution=MountExecutionMatches,context=MountContext)
+
+LET PackageRaw <= SELECT * FROM chain(
+  debian={SELECT *,"Debian" AS PackageFamily,"LTH.SystemBaseline/DebianPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/DebianPackages")},
+  rhel={SELECT *,"RHEL" AS PackageFamily,"LTH.SystemBaseline/RHELPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/RHELPackages")}
+)
+LET PackageFields <= SELECT ClientId,Fqdn,PackageFamily,PackageSource,
+  TextOrEmpty(X=(get(item=scope(),field="Package") || get(item=scope(),field="Name"))) AS PackageName,
+  TextOrEmpty(X=get(item=scope(),field="Version")) AS PackageVersion,
+  TextOrEmpty(X=(get(item=scope(),field="State") || get(item=scope(),field="Status"))) AS PackageState,
+  TextOrEmpty(X=get(item=scope(),field="Repository")) AS PackageRepository
+FROM PackageRaw
+LET InstalledPackages <= SELECT *,
+  regex_replace(source=PackageName,
+    re='''(\.(x86_64|i[3-6]86|noarch|aarch64|armv[0-9]+[a-z]*|ppc64le|s390x)|:[a-z0-9_-]+)$''',replace="") AS NormalizedPackage
+FROM PackageFields
+WHERE PackageName!="" AND (PackageFamily="RHEL" OR PackageState IN ("installed","active"))
+LET PackageContext <= SELECT ClientId,Fqdn,"Package Review" AS Category,
+  "baseline_dual_use_package_inventory" AS SignalId,
+  "Installed network, proxy or remote-access tooling for role review" AS Indicator,
+  0 AS FindingWeight,PackageName AS Evidence1,PackageVersion AS Evidence2,
+  dict(Family=PackageFamily,State=PackageState,Repository=PackageRepository) AS Evidence3,
+  "Installed software inventory does not establish execution, compromise, file ownership or vulnerability" AS Evidence4,
+  format(format="%v|package_context|%v|%v|%v",args=[ClientId,PackageSource,PackageName,PackageVersion]) AS EvidenceKey,
+  PackageSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this tool expected for the server role, and do process/network findings show relevant use?" AS Hypothesis,
+  "RHEL package names include architecture; removed Debian entries are excluded. No version-to-CVE inference" AS ObservationLimit,
+  "LTH - 01 / LTH - 04 / LTH - 05" AS RecommendedNotebook
+FROM InstalledPackages
+WHERE NormalizedPackage =~ '''^(nmap|nmap-ncat|ncat|netcat|netcat-openbsd|netcat-traditional|socat|masscan|proxychains|proxychains4|chisel|ngrok|frp|frpc|frps|rclone|openssh-clients|openssh-client)$'''
+
+LET SecurityServiceMatches <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_security_service_state" AS SignalId,
+  "A listed logging/audit service has an inactive or failed state" AS Indicator,
+  2 AS FindingWeight,ServiceUnit AS Evidence1,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence2,
+  ServiceDescription AS Evidence3,
+  "Review maintenance, configured logging architecture and service diagnostics" AS Evidence4,
+  format(format="%v|security_service_state|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this observed service state expected, or has logging continuity been affected?" AS Hypothesis,
+  "Only an existing row is evaluated; absence does not mean disabled. State does not establish tampering" AS ObservationLimit,
+  "LTH - 04 / LTH - 08" AS RecommendedNotebook
+FROM ServiceFields
+WHERE ServiceLoad="loaded" AND ServiceUnit =~ '''^(auditd|rsyslog|systemd-journald)\.service$'''
+  AND (ServiceActive IN ("failed","inactive") OR ServiceSub="failed")
 LET SourceCoverage <=
 SELECT *
 FROM chain(
@@ -2227,6 +2859,7 @@ FROM chain(
            0 AS EvidenceCount,
            1 AS SourceCollected
     FROM CronFields
+    WHERE CommandValue!="" OR CronContent!=""
     GROUP BY ClientId
   }
 )
@@ -2234,46 +2867,297 @@ FROM chain(
 
 -- ============================================================
 -- 8. Merge category-level findings
--- ============================================================
+LET InventoryPlatform <= SELECT ClientId,Fqdn,TextOrEmpty(X=get(item=scope(),field="Platform")) AS Platform
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET PlatformFamilies <= SELECT *,
+  if(condition=Platform =~ '''(?i)^(ubuntu|debian|linuxmint|kali|raspbian|pop)$''',then="Debian",
+    else=if(condition=Platform =~ '''(?i)^(alma|almalinux|rocky|rhel|redhat|red hat.*|centos|ol|oracle|oraclelinux|fedora)$''',then="RHEL",else="Unknown")) AS ExpectedPackageFamily
+FROM InventoryPlatform
+LET PlatformIndex <= memoize(query={SELECT * FROM PlatformFamilies},key="ClientId")
+LET ApplicablePackages <= SELECT *,get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily AS ExpectedFamily
+FROM InstalledPackages
+WHERE PackageFamily=ExpectedFamily
 
-LET Findings <=
-SELECT *
-FROM chain(
-  coverage={
-    SELECT *
-    FROM Fleet
-  },
-  source_coverage={
-    SELECT *
-    FROM SourceCoverage
-  },
-  users={
-    SELECT *
-    FROM SuspiciousUsers
-  },
-  processes={
-    SELECT *
-    FROM SuspiciousProcesses
-  },
-  services={
-    SELECT *
-    FROM SuspiciousServices
-  },
-  network={
-    SELECT *
-    FROM SuspiciousNetwork
-  },
-  cron={
-    SELECT *
-    FROM SuspiciousCron
-  }
+LET ExtraCoverage <= SELECT * FROM chain(
+  mounts={SELECT ClientId,Fqdn,"Coverage" AS Category,"Mounts source returned rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM MountFields GROUP BY ClientId},
+  packages={SELECT ClientId,Fqdn,"Coverage" AS Category,"Applicable package family returned installed rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM ApplicablePackages GROUP BY ClientId}
 )
 
+LET SelectedScope <= SELECT ClientId,Fqdn FROM chain(
+  inventory=Fleet,users=UserFields,processes=ProcessFields,services=ServiceFields,
+  network=NetworkFields,cron=CronFields,mounts=MountFields,packages=PackageFields
+) GROUP BY ClientId
 
--- ============================================================
--- 9. Calculate one score per host
--- ============================================================
+LET CronQuality <= SELECT ClientId,
+  sum(item=if(condition=CommandValue!="" AND CronParserVersion!=2,then=1,else=0)) AS LegacyCronRows,
+  sum(item=if(condition=CronParseStatus="Unparsed",then=1,else=0)) AS UnparsedCronRows,
+  sum(item=if(condition=CronPotentiallyTruncated=TRUE,then=1,else=0)) AS TruncatedCronScripts
+FROM CronFields GROUP BY ClientId
+LET CronQualityIndex <= memoize(query={SELECT * FROM CronQuality},key="ClientId")
 
+LET AllEvidenceCandidates <= SELECT * FROM chain(
+  users=UserDetail,processes=ProcessDetail,services=ServiceDetail,network=NetworkDetail,cron=CronDetail,
+  accounts=AccountMatches,process_context=ExtraProcessMatches,cron_scripts=CronScriptMatches,
+  mounts=MountReview,packages=PackageContext,security_services=SecurityServiceMatches
+)
+LET AllEvidence <= SELECT * FROM AllEvidenceCandidates GROUP BY EvidenceKey
+LET PositiveEvidence <= SELECT * FROM AllEvidence WHERE FindingWeight>0
+
+-- Original five categories; cap each category at its highest matched weight.
+LET RiskAreas <= SELECT ClientId,Fqdn,Category,
+  "Highest matched weight in this existing area" AS Indicator,
+  max(item=FindingWeight) AS Weight,count() AS EvidenceCount,0 AS SourceCollected,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM PositiveEvidence GROUP BY AreaKey
+LET Findings <= SELECT * FROM chain(
+  all_clients={SELECT ClientId,Fqdn,"Coverage" AS Category,"Client has selected baseline data" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,0 AS SourceCollected FROM SelectedScope},
+  inventory=Fleet,source_coverage=SourceCoverage,added_coverage=ExtraCoverage,areas=RiskAreas
+)
+
+-- Edit to include your actual internal networks, including internally routed public ranges.
+-- A peer outside this list is not automatically Internet traffic or malicious.
+LET ReviewInternalCIDRs <= split(string="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",sep=",")
+
+LET ReviewMinCohortHosts <= 4
+LET ReviewMaxRareHosts <= 2
+LET ReviewMaxRarePercent <= 25
+
+LET AdminProcessSignals <= SELECT *,
+  ProcName =~ '''(?i)^ssh$''' AS RemoteClient,
+  ProcName =~ '''(?i)^(scp|sftp|rsync|rclone)$''' AS TransferTool,
+  ProcName =~ '''(?i)^(curl|wget)$''' AS FetchTool,
+  ProcName =~ '''(?i)^(nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS NetworkUtility,
+  (ProcUsername="root" AND ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS RootShell,
+  ProcName =~ '''(?i)^(sudo|su|doas)$''' AS PrivilegeUtility,
+  ProcCommandLine =~ '''(?i)(^|\s|/)(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)''' AS InlineCode,
+  (ProcName =~ '''(?i)^(screen|tmux|nohup)$'''
+   OR ProcCommandLine =~ '''(?i)^\s*(sudo\s+)?nohup\s''') AS BackgroundSession,
+  ProcExe =~ '''^/(usr/local|opt|srv|home|root|mnt|media)/''' AS ApplicationPathExe,
+  (ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|php[0-9.]*|ruby)$'''
+   AND ProcCommandLine =~ '''\s/(usr/local|opt|srv|home|root|mnt|media)/[^\s;&|]+''') AS InterpreterPathReference
+FROM ProcessFields
+
+LET AdministrativeProcessLeads <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "review_administrative_process" AS SignalId,
+  "Administrative, application-path or interpreter process to validate" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=RootShell OR PrivilegeUtility OR InlineCode OR TransferTool OR RemoteClient,then=2,else=1) AS ReviewPriority,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Name=ProcName,Username=ProcUsername,FlowId=RowFlowId) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(RemoteClient=RemoteClient,TransferTool=TransferTool,FetchTool=FetchTool,NetworkUtility=NetworkUtility,
+    RootShell=RootShell,PrivilegeUtility=PrivilegeUtility,InlineCode=InlineCode,BackgroundSession=BackgroundSession,
+    ApplicationPathExe=ApplicationPathExe,InterpreterPathReference=InterpreterPathReference) AS Evidence4,
+  format(format="%v|%v|review_process|%v|%v|%v",args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this observed command, account, path and peer fit the approved administration or application workflow?" AS Hypothesis,
+  "Identify the process owner and approved task; read parent and network context; validate the script or binary when needed" AS SuggestedChecks,
+  "Current process snapshot only. Root shell is not proof of an interactive session; an interpreter argument may reference data rather than executed code" AS ObservationLimit,
+  "LTH - 04 / LTH - 03 / LTH - 05" AS RecommendedNotebook
+FROM AdminProcessSignals
+WHERE RemoteClient OR TransferTool OR FetchTool OR NetworkUtility OR RootShell OR PrivilegeUtility
+   OR InlineCode OR BackgroundSession OR ApplicationPathExe OR InterpreterPathReference
+
+LET ReviewAccountSignals <= SELECT *,
+  (UserUid!="0" AND UserUid!="" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS NonRootShellAccount,
+  (UserUid!="0" AND UserUid!="" AND HomeDir =~ '''^/(root|opt|srv)(/|$)''') AS ApplicationHomeAccount
+FROM UserFields
+LET ReviewAccountLeads <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "review_account_role" AS SignalId,"Account shell or application home requires role confirmation" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,dict(Shell=UserShell,Home=HomeDir) AS Evidence3,
+  dict(NonRootShellAccount=NonRootShellAccount,ApplicationHomeAccount=ApplicationHomeAccount) AS Evidence4,
+  format(format="%v|review_account|%v|%v|%v|%v",args=[ClientId,UserName,UserUid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this account, shell and home required by a named person or application?" AS Hypothesis,
+  "Identify the account owner and intended role; request authentication or group evidence only if the hypothesis requires it" AS SuggestedChecks,
+  "Passwd snapshot: configured shell is not proof of login, and primary GID is not supplementary group membership" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook
+FROM ReviewAccountSignals WHERE NonRootShellAccount OR ApplicationHomeAccount
+
+LET ScheduledTaskLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_scheduled_command" AS SignalId,"Scheduled command for administrative-workflow review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=CronUser="root" OR CronEvent="@reboot" OR (Minute IN ("*","*/1") AND Hour="*"),then=2,else=1) AS ReviewPriority,
+  CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParserVersion=CronParserVersion,ParseStatus=CronParseStatus) AS Evidence4,
+  format(format="%v|review_cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,CronPath,CronUser,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this scheduled command, execution account and frequency belong to an approved job?" AS Hypothesis,
+  "Identify the job owner; validate its script and destination; use execution logs if proof of a run is needed" AS SuggestedChecks,
+  "Shows every nonempty parsed command, including legitimate maintenance. Legacy cron parsing may have lost the real command or user" AS ObservationLimit,
+  "LTH - 06 / LTH - 04" AS RecommendedNotebook
+FROM CronResults
+
+LET ScheduledScriptLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_cron_script" AS SignalId,"Periodic cron script content for purpose and ownership review" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ScriptPath AS Evidence1,ScriptContent AS Evidence2,
+  ScriptMtime AS Evidence3,dict(FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated) AS Evidence4,
+  format(format="%v|review_cron_script|%v|%v",args=[ClientId,ScriptPath,ScriptContent]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script expected in a periodic cron directory, and is it actually invoked by the configured scheduler?" AS Hypothesis,
+  "Review the collected content and owner; confirm run-parts eligibility and scheduler configuration if execution matters" AS SuggestedChecks,
+  "Only a collected content prefix; placement and Mtime do not prove execution or identify the modifier" AS ObservationLimit,
+  "LTH - 06" AS RecommendedNotebook
+FROM CronScriptFiles
+
+LET AccountScheduledLeads <= SELECT * FROM chain(accounts=ReviewAccountLeads,commands=ScheduledTaskLeads,scripts=ScheduledScriptLeads)
+
+LET ReviewNetworkFields <= SELECT *,
+  regex_replace(source=Laddr,re='''^\[|\]$''',replace="") AS ReviewLocalIP,
+  regex_replace(source=Raddr,re='''^\[|\]$''',replace="") AS ReviewPeerIP,
+  ConnStatus =~ '''(?i)^LISTEN(ING)?$''' AS ReviewListening,
+  ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$''' AS ReviewEstablished,
+  ProcName =~ '''(?i)^(ssh|scp|sftp|rsync|rclone|curl|wget|nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS ReviewAdministrativeTool
+FROM NetworkResults
+LET ReviewNetworkSignals <= SELECT *,
+  (ReviewListening AND cidr_contains(ip=ReviewLocalIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewLocalIP,ranges=["127.0.0.0/8","::1/128"])) AS NonLoopbackListener,
+  (ReviewEstablished AND ReviewAdministrativeTool
+    AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["127.0.0.0/8","::1/128","0.0.0.0/8","::/128"])) AS AdministrativeConnection,
+  (ReviewEstablished AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","224.0.0.0/4","240.0.0.0/4","::/128","::1/128","fe80::/10","ff00::/8"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=ReviewInternalCIDRs)) AS PeerOutsideConfiguredNetworks
+FROM ReviewNetworkFields
+LET NetworkReviewLeads <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "review_socket_role" AS SignalId,"Listener or established peer for role and administration review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=AdministrativeConnection OR PeerOutsideConfiguredNetworks,then=2,else=1) AS ReviewPriority,
+  dict(Pid=Pid,Name=ProcName,Username=ProcUsername) AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,CallChain=CallChain,
+    NonLoopbackListener=NonLoopbackListener,AdministrativeConnection=AdministrativeConnection,
+    PeerOutsideConfiguredNetworks=PeerOutsideConfiguredNetworks) AS Evidence4,
+  format(format="%v|review_socket|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,Pid,Laddr,Lport,Raddr,Rport,ConnStatus,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this process need this listening address or peer for its approved service or administrative task?" AS Hypothesis,
+  "Identify service and destination owners; confirm intended exposure and peer; correlate with the process and approved task" AS SuggestedChecks,
+  "Established sockets do not establish initiation direction. Wildcard listening does not prove Internet reachability; configured CIDRs are not a reputation check" AS ObservationLimit,
+  "LTH - 05 / LTH - 04" AS RecommendedNotebook
+FROM ReviewNetworkSignals
+WHERE NonLoopbackListener OR AdministrativeConnection OR PeerOutsideConfiguredNetworks
+
+LET ReviewServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(ssh|sshd|xrdp|xrdp-sesman|vncserver|tigervnc|telnet|rsh)([-.@][^ ]*)?\.service$''' AS RemoteAccessService,
+  ServiceUnit =~ '''(?i)^(docker|containerd|crio|cri-o|podman|kubelet)([-.@][^ ]*)?\.service$''' AS ContainerService,
+  ServiceUnit =~ '''(?i)^(nginx|apache2|httpd|mysql|mysqld|mariadb|postgresql|postgres|redis|redis-server|mongod|mongodb|elasticsearch)([-.@][^ ]*)?\.service$''' AS ApplicationDataService,
+  ServiceUnit =~ '''(?i)^(nfs|nfs-server|rpcbind|smb|smbd|nmb|nmbd|vsftpd|proftpd|pure-ftpd)([-.@][^ ]*)?\.service$''' AS FileSharingService
+FROM ServiceFields
+LET ActiveServiceLeads <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "review_active_service_role" AS SignalId,"Active access, application, container or file-sharing service" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(RemoteAccessService=RemoteAccessService,ContainerService=ContainerService,
+    ApplicationDataService=ApplicationDataService,FileSharingService=FileSharingService) AS Evidence4,
+  format(format="%v|review_service|%v|%v|%v",args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this active service required for the host role and is its access or data exposure intended?" AS Hypothesis,
+  "Confirm the service owner and purpose; inspect related listeners; collect unit configuration only for the selected hypothesis" AS SuggestedChecks,
+  "Observed loaded service state and naming only; no ExecStart, enablement, installed-package ownership or exposure proof" AS ObservationLimit,
+  "LTH - 04 / LTH - 05 / LTH - 12" AS RecommendedNotebook
+FROM ReviewServiceSignals
+WHERE ServiceLoad="loaded" AND ServiceActive="active"
+  AND (RemoteAccessService OR ContainerService OR ApplicationDataService OR FileSharingService)
+
+LET ReviewPlatforms <= SELECT ClientId,
+  (TextOrEmpty(X=get(item=scope(),field="Platform")) || "Unknown") AS ReviewCohort
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET ReviewPlatformIndex <= memoize(query={SELECT * FROM ReviewPlatforms},key="ClientId")
+
+-- Denominator is distinct clients that returned usable rows for this source,
+-- not all 16 scoped clients when some source results are missing.
+LET ReviewSourceClients <= SELECT * FROM chain(
+  processes={SELECT ClientId,"Process executable" AS Family FROM ProcessFields WHERE ProcExe!="" GROUP BY ClientId},
+  services={SELECT ClientId,"Service unit" AS Family FROM ServiceFields WHERE ServiceUnit!="" GROUP BY ClientId},
+  users={SELECT ClientId,"Shell account" AS Family FROM UserFields WHERE UserName!="" GROUP BY ClientId},
+  cron={SELECT ClientId,"Cron command" AS Family FROM CronResults GROUP BY ClientId}
+)
+LET ReviewSourceCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewSourceClients
+LET ReviewCoverage <= SELECT Family,ReviewCohort,count() AS CoveredHosts,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewSourceCohorts GROUP BY CohortKey
+LET ReviewCoverageIndex <= memoize(query={SELECT * FROM ReviewCoverage},key="CohortKey")
+
+LET ReviewObservations <= SELECT * FROM chain(
+  processes={SELECT ClientId,Fqdn,"Processes" AS Category,"Process executable" AS Family,
+    regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS Entity,
+    "LTH.SystemBaseline/Processes" AS ObservationSource FROM ProcessFields WHERE ProcExe!=""},
+  services={SELECT ClientId,Fqdn,"Services and Persistence" AS Category,"Service unit" AS Family,
+    ServiceUnit AS Entity,"LTH.SystemBaseline/Services" AS ObservationSource FROM ServiceFields WHERE ServiceUnit!=""},
+  users={SELECT ClientId,Fqdn,"Users and Privileges" AS Category,"Shell account" AS Family,
+    UserName+"|"+UserShell AS Entity,"LTH.SystemBaseline/Users" AS ObservationSource
+    FROM UserFields WHERE UserUid!="0" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$'''},
+  cron={SELECT ClientId,Fqdn,"Persistence" AS Category,"Cron command" AS Family,
+    CronUser+"|"+CronCommand AS Entity,"LTH.SystemBaseline/Crontab" AS ObservationSource FROM CronResults}
+)
+LET ReviewObservedCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewObservations
+LET ReviewUniqueHostEntities <= SELECT *,
+  format(format="%v|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS HostEntityKey,
+  format(format="%v|%v|%v",args=[ReviewCohort,Family,Entity]) AS PrevalenceKey,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewObservedCohorts GROUP BY HostEntityKey
+LET ReviewPrevalence <= SELECT PrevalenceKey,count() AS HostsWithEntity
+FROM ReviewUniqueHostEntities GROUP BY PrevalenceKey
+LET ReviewPrevalenceIndex <= memoize(query={SELECT * FROM ReviewPrevalence},key="PrevalenceKey")
+LET ReviewPrevalenceRows <= SELECT *,
+  get(item=ReviewCoverageIndex,field=CohortKey).CoveredHosts AS CoveredHosts,
+  get(item=ReviewPrevalenceIndex,field=PrevalenceKey).HostsWithEntity AS HostsWithEntity
+FROM ReviewUniqueHostEntities
+LET RareBaselineLeads <= SELECT ClientId,Fqdn,Category,
+  "review_low_prevalence" AS SignalId,"Low-prevalence baseline entity in the observed platform cohort" AS Indicator,
+  0 AS FindingWeight,2 AS ReviewPriority,Family AS Evidence1,Entity AS Evidence2,
+  dict(PlatformCohort=ReviewCohort,HostsWithEntity=HostsWithEntity,CoveredHosts=CoveredHosts) AS Evidence3,
+  "Compare approved roles before treating rarity as an anomaly; do not interpret as newly created" AS Evidence4,
+  format(format="%v|review_prevalence|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS EvidenceKey,
+  ObservationSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this uncommon executable, unit, account or scheduled command explained by this host's approved role?" AS Hypothesis,
+  "Compare with hosts having the same business role; identify owner and deployment purpose; inspect related baseline evidence" AS SuggestedChecks,
+  "One-Hunt prevalence among clients with source rows. Platform is not a business-role cohort; exact cron commands may contain host-specific values" AS ObservationLimit,
+  "LTH - 01 / the notebook for the observed family" AS RecommendedNotebook
+FROM ReviewPrevalenceRows
+WHERE ReviewCohort!="Unknown" AND CoveredHosts>=ReviewMinCohortHosts
+  AND HostsWithEntity<=ReviewMaxRareHosts
+  AND (HostsWithEntity * 100)<= (CoveredHosts * ReviewMaxRarePercent)
+
+LET AdditionalReviewCandidates <= SELECT * FROM chain(
+  admin=AdministrativeProcessLeads,account_cron=AccountScheduledLeads,
+  network=NetworkReviewLeads,services=ActiveServiceLeads,prevalence=RareBaselineLeads
+)
+LET EnhancedEvidenceCandidates <= SELECT * FROM chain(existing=AllEvidence,review=AdditionalReviewCandidates)
+LET EnhancedEvidence <= SELECT *,
+  if(condition=FindingWeight>0,then="Risk Indicator",else="Hunt Lead") AS EvidenceKind,
+  "Unreviewed" AS ReviewState,
+  if(condition=FindingWeight>=4,then=3,else=if(condition=FindingWeight>0,then=2,
+    else=(get(item=scope(),field="ReviewPriority") || 1))) AS ReviewPriority,
+  (get(item=scope(),field="SuggestedChecks") || Hypothesis) AS SuggestedChecks
+FROM EnhancedEvidenceCandidates GROUP BY EvidenceKey
+
+LET HuntLeadSummary <= SELECT ClientId,count() AS HuntLeadCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority
+FROM EnhancedEvidence GROUP BY ClientId
+LET HuntLeadIndex <= memoize(query={SELECT * FROM HuntLeadSummary},key="ClientId")
+LET FirstHuntLead(C) = SELECT Hypothesis FROM EnhancedEvidence WHERE ClientId=C ORDER BY ReviewPriority DESC LIMIT 1
+
+LET EvidenceAreas <= SELECT ClientId,Fqdn,Category,
+  max(item=FindingWeight) AS Weight,
+  sum(item=if(condition=FindingWeight>0,then=1,else=0)) AS EvidenceCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM EnhancedEvidence GROUP BY AreaKey
 LET HostScores <=
 SELECT ClientId,
        Fqdn,
@@ -2297,26 +3181,44 @@ SELECT ClientId,
 FROM Findings
 GROUP BY ClientId
 
-
+LET ExtendedHostScores <=
 SELECT ClientId,
        Fqdn,
        TriggeredAreaCount,
        RiskScore,
+       (get(item=HuntLeadIndex,field=ClientId).HuntLeadCount || 0) AS HuntLeadCount,
+       (get(item=HuntLeadIndex,field=ClientId).ReviewLeadCount || 0) AS ReviewLeadCount,
+       (get(item=HuntLeadIndex,field=ClientId).HighestReviewPriority || 0) AS HighestReviewPriority,
+       if(condition=RiskScore>0,then="Risk Indicators Found",
+         else=if(condition=get(item=HuntLeadIndex,field=ClientId).ReviewLeadCount>0,
+           then="Review Leads Available",else="Planned Hunt Needed")) AS HuntStatus,
+       (FirstHuntLead(C=ClientId)[0].Hypothesis || "Confirm host role and collection coverage; select a role-based hypothesis even when this snapshot has no lead") AS TopHuntHypothesis,
        FindingEvidenceCount,
        CriticalAreaCount,
        CollectedSourceCount,
-       6 AS ExpectedSourceCount,
+       8 AS ExpectedSourceCount,
+       get(item=PlatformIndex,field=ClientId).Platform AS Platform,
+       (get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily || "Unknown") AS ExpectedPackageFamily,
+       (get(item=CronQualityIndex,field=ClientId).LegacyCronRows || 0) AS LegacyCronRows,
+       (get(item=CronQualityIndex,field=ClientId).UnparsedCronRows || 0) AS UnparsedCronRows,
+       (get(item=CronQualityIndex,field=ClientId).TruncatedCronScripts || 0) AS TruncatedCronScripts,
+       if(condition=get(item=CronQualityIndex,field=ClientId).LegacyCronRows>0
+           OR get(item=CronQualityIndex,field=ClientId).UnparsedCronRows>0,
+         then="Cron parser review required; read RawLine or recollect with parser v2",
+         else="No detected parser warning; row presence does not establish complete collection") AS DataQualityStatus,
        if(
-         condition=CollectedSourceCount = 6,
-         then="Complete - all expected sources returned rows",
+         condition=CollectedSourceCount = 8,
+         then="Selected sources returned rows; inspect collection logs for errors",
          else=format(
-           format="Validate empty sources - %v of 6 returned rows",
+           format="Validate empty sources - %v of 8 selected source groups returned rows",
            args=[CollectedSourceCount]
          )
        ) AS CollectionStatus,
        if(
          condition=RiskScore = 0
-                   AND CollectedSourceCount < 6,
+                   AND (CollectedSourceCount < 8
+                     OR get(item=CronQualityIndex,field=ClientId).LegacyCronRows>0
+                     OR get(item=CronQualityIndex,field=ClientId).UnparsedCronRows>0),
          then="Collection Review",
          else=if(
            condition=RiskScore = 0,
@@ -2338,59 +3240,65 @@ SELECT ClientId,
          )
        ) AS RiskLevel
 FROM HostScores
-ORDER BY RiskScore DESC
+
+-- Full evidence remains in cell 15. This view shows a short starting list per host.
+LET TopHostLeads(C) = SELECT * FROM EnhancedEvidence WHERE ClientId=C ORDER BY ReviewPriority DESC LIMIT 5
+LET HostStartingPoints <= SELECT * FROM chain(
+  profiles={SELECT ClientId,Fqdn,"Host Review" AS EntryType,0 AS ReviewPriority,0 AS Weight,
+    RiskScore,HuntLeadCount,ReviewLeadCount,HuntStatus,CollectionStatus,
+    "Confirm host role, collection health and the first hypothesis to investigate" AS Indicator,
+    TopHuntHypothesis AS Hypothesis,
+    "Use the entries below for this client; if none exist, choose a role-based hypothesis and identify the missing evidence" AS SuggestedChecks,
+    dict(CollectedSourceCount=CollectedSourceCount,ExpectedSourceCount=ExpectedSourceCount,DataQualityStatus=DataQualityStatus) AS Evidence1,
+    NULL AS Evidence2,NULL AS Evidence3,NULL AS Evidence4,
+    "This row is a host review task, not an observed finding. A client with no result at all is not visible in hunt_results" AS ObservationLimit,
+    format(format="%v|host_review",args=[ClientId]) AS FindingKey,HuntId AS SourceHuntId,"LTH.SystemBaseline" AS SourceArtifact
+    FROM ExtendedHostScores},
+  leads={SELECT * FROM foreach(row=ExtendedHostScores,query={
+    SELECT ClientId,Fqdn,EvidenceKind AS EntryType,ReviewPriority,FindingWeight AS Weight,
+      RiskScore,HuntLeadCount,ReviewLeadCount,HuntStatus,CollectionStatus,
+      Indicator,Hypothesis,SuggestedChecks,Evidence1,Evidence2,Evidence3,Evidence4,ObservationLimit,
+      EvidenceKey AS FindingKey,SourceHuntId,SourceArtifact
+    FROM TopHostLeads(C=ClientId)
+  })}
+)
+SELECT * FROM HostStartingPoints ORDER BY ReviewPriority DESC
+
 ```
 
-## Cell 8 — Evidence Behind the Score
+## Cell 26 (markdown)
 
-Shows the exact contribution of each triggered hunting area to the client RiskScore.
+# Master Risk Score
 
-Each area contributes its highest applicable weight once. FindingCount shows the number of underlying matched findings, while ScoreContribution shows the value added to the Master Risk Score.
-
-The sum of ScoreContribution for each client must equal its RiskScore.
+## Cell 27 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
 
--- TRUE for the presentation lab. Set to FALSE in production.
-LET EnableLabIndicators <= TRUE
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+-- Keep this FALSE on the production server, consistently in all cells.
+LET EnableLabIndicators <= FALSE
 
 
--- ============================================================
--- 1. Fleet coverage
--- ============================================================
-
-LET Fleet <=
-SELECT ClientId,
-       Fqdn,
-       "Coverage" AS Category,
-       "Baseline successfully collected" AS Indicator,
-       0 AS Weight,
-       0 AS EvidenceCount,
-       1 AS SourceCollected
-FROM hunt_results(
-  hunt_id=HuntId,
-  artifact="LTH.SystemBaseline/Client_BasicInformation"
-)
+LET Fleet <= SELECT ClientId,Fqdn,"Coverage" AS Category,"Basic information source returned rows" AS Indicator,
+  0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
 GROUP BY ClientId
-
-
--- ============================================================
--- 2. Additional UID 0 accounts
--- ============================================================
-
 LET UserFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="Uid")) AS UserUid,
-       str(str=(
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
          get(item=scope(), member="Name")
          ||
          get(item=scope(), member="User")
          ||
          get(item=scope(), member="Username")
        )) AS UserName,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Homedir")
          ||
          get(item=scope(), member="HomeDir")
@@ -2418,69 +3326,39 @@ WHERE UserUid = "0"
     AND HomeDir = "/root"
   )
 
-
-LET UniqueUsers <=
-SELECT ClientId,
-       Fqdn,
-       UserName,
-       HomeDir,
-       FindingWeight
-FROM UserMatches
-GROUP BY EvidenceKey
-
-
-LET UsersByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount
-FROM UniqueUsers
-GROUP BY ClientId
-
-
-LET SuspiciousUsers <=
-SELECT ClientId,
-       Fqdn,
-       "Users and Privileges" AS Category,
-       "Additional UID 0 account" AS Indicator,
-       5 AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM UsersByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 3. Suspicious processes
--- ============================================================
-
 LET ProcessFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=(
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
          get(item=scope(), member="Pid")
          ||
          get(item=scope(), member="PID")
        )) AS ProcPid,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Ppid")
          ||
          get(item=scope(), member="PPid")
          ||
          get(item=scope(), member="PPID")
        )) AS ProcPpid,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Name")
          ||
          get(item=scope(), member="ProcessName")
        )) AS ProcName,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="Exe")
          ||
          get(item=scope(), member="Executable")
          ||
          get(item=scope(), member="Path")
        )) AS ProcExe,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=scope(), member="CommandLine")
          ||
          get(item=scope(), member="Cmdline")
@@ -2545,7 +3423,10 @@ SELECT *,
 
        ProcCommandLine =~
          '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
-         AS PythonHTTPServer
+         AS PythonHTTPServer,
+       ProcExe =~ '''(?i)^/run/user/[0-9]+/''' AS UserRuntimeExecution,
+       (ProcName =~ '''(?i)^(xmrig|minerd|kinsing|kdevtmpfsi)$'''
+        OR ProcCommandLine =~ '''(?i)(xmrig|stratum\+tcp)''') AS MiningPattern
 FROM ProcessFields
 
 
@@ -2565,11 +3446,14 @@ SELECT *,
          then=5,
          else=if(
            condition=WritablePathExe
-                     OR WritablePathExecution,
+                     OR WritablePathExecution
+                     OR MiningPattern
+                     OR (UserRuntimeExecution AND PythonHTTPServer),
            then=4,
            else=if(
              condition=NetcatTool
-                       OR SocatTool,
+                       OR SocatTool
+                       OR UserRuntimeExecution,
              then=3,
              else=2
            )
@@ -2586,216 +3470,40 @@ WHERE DownloadPipeShell
    OR NetcatTool
    OR SocatTool
    OR PythonHTTPServer
+   OR UserRuntimeExecution
+   OR MiningPattern
 
 
-LET UniqueProcesses <=
-SELECT ClientId,
-       Fqdn,
-       ProcPid,
-       ProcName,
-       ProcExe,
-       ProcCommandLine,
-       FindingWeight
-FROM ProcessMatches
-GROUP BY EvidenceKey
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
 
-
-LET ProcessesByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
-         )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 2,
-           then=1,
-           else=0
-         )
-       ) AS LowCount
-FROM UniqueProcesses
-GROUP BY ClientId
-
-
-LET SuspiciousProcesses <=
-SELECT ClientId,
-       Fqdn,
-       "Processes" AS Category,
-       "Suspicious process behavior" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM ProcessesByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 4. Suspicious systemd services
--- ============================================================
-
-LET ServiceFields <=
-SELECT ClientId,
-       Fqdn,
-       str(str=(
-         get(item=scope(), member="Unit")
-         ||
-         get(item=scope(), member="Name")
-         ||
-         get(item=scope(), member="Service")
-       )) AS ServiceUnit,
-       str(str=get(item=scope(), member="Description"))
-         AS ServiceDescription,
-       str(str=(
-         get(item=scope(), member="ExecStart")
-         ||
-         get(item=scope(), member="Command")
-         ||
-         get(item=scope(), member="CommandLine")
-       )) AS ServiceCommand,
-       str(str=(
-         get(item=scope(), member="FragmentPath")
-         ||
-         get(item=scope(), member="SourcePath")
-         ||
-         get(item=scope(), member="Path")
-       )) AS ServicePath
-FROM hunt_results(
-  hunt_id=HuntId,
-  artifact="LTH.SystemBaseline/Services"
-)
-
-
-LET ServiceSignals <=
-SELECT *,
-       ServiceCommand =~
-         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
-         AS DownloadPipeShell,
-
-       (
-         ServiceCommand =~
-           '''(?i)(^|\s)/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         ServicePath =~
-           '''(?i)^/(tmp|var/tmp|dev/shm)/'''
-       ) AS WritableServiceExecution,
-
-       (
-         EnableLabIndicators
-         AND
-         (
-           ServiceUnit =~
-             '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
-           OR
-           ServiceDescription =~
-             '''(?i)(lab persistence|temporary update service|remote support lab)'''
-         )
-       ) AS KnownLabService
+LET ServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(kinsing|xmrig|kdevtmpfsi|watchbog)([-_.@][a-z0-9_.@-]+)?\.service$''' AS ThreatAssociatedName,
+  ServiceDescription =~ '''(?i)(cryptocurrency[ -](miner|mining)|reverse[ -]shell|backdoor[ -]service|unauthorized[ -]remote[ -]access)''' AS HighRiskDescription,
+  (EnableLabIndicators AND
+   (ServiceUnit =~ '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
+    OR ServiceDescription =~ '''(?i)(lab persistence|temporary update service|remote support lab)''')) AS KnownLabService
 FROM ServiceFields
 
-
-LET ServiceMatches <=
-SELECT *,
-       format(
-         format="%v|service|%v|%v|%v",
-         args=[ClientId, ServiceUnit, ServicePath, ServiceCommand]
-       ) AS EvidenceKey,
-       if(
-         condition=DownloadPipeShell,
-         then=5,
-         else=4
-       ) AS FindingWeight
+LET ServiceMatches <= SELECT *,
+  format(format="%v|service|%v|%v|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceDescription,ServiceLoad,ServiceActive,ServiceSub]) AS EvidenceKey,
+  if(condition=ThreatAssociatedName,then=5,else=4) AS FindingWeight
 FROM ServiceSignals
-WHERE DownloadPipeShell
-   OR WritableServiceExecution
-   OR KnownLabService
-
-
-LET UniqueServices <=
-SELECT ClientId,
-       Fqdn,
-       ServiceUnit,
-       ServicePath,
-       ServiceCommand,
-       FindingWeight
-FROM ServiceMatches
-GROUP BY EvidenceKey
-
-
-LET ServicesByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount
-FROM UniqueServices
-GROUP BY ClientId
-
-
-LET SuspiciousServices <=
-SELECT ClientId,
-       Fqdn,
-       "Services and Persistence" AS Category,
-       "Suspicious systemd service" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=4
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM ServicesByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 5. Suspicious network activity
--- ============================================================
+WHERE ThreatAssociatedName OR HighRiskDescription OR KnownLabService
 
 LET NetworkFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="Laddr")) AS Laddr,
-       str(str=get(item=scope(), member="Lport")) AS Lport,
-       str(str=get(item=scope(), member="Raddr")) AS Raddr,
-       str(str=get(item=scope(), member="Rport")) AS Rport,
-       str(str=get(item=scope(), member="Pid")) AS Pid,
-       str(str=get(item=scope(), member="Status")) AS ConnStatus,
+       TextOrEmpty(X=get(item=scope(),field="CallChain")) AS RawCallChain,
+       TextOrEmpty(X=get(item=scope(), member="Laddr")) AS Laddr,
+       TextOrEmpty(X=get(item=scope(), member="Lport")) AS Lport,
+       TextOrEmpty(X=get(item=scope(), member="Raddr")) AS Raddr,
+       TextOrEmpty(X=get(item=scope(), member="Rport")) AS Rport,
+       TextOrEmpty(X=get(item=scope(), member="Pid")) AS Pid,
+       TextOrEmpty(X=get(item=scope(), member="Status")) AS ConnStatus,
        get(item=scope(), member="ProcInfo") AS ProcInfo
 FROM hunt_results(
   hunt_id=HuntId,
@@ -2812,17 +3520,19 @@ SELECT ClientId,
        Rport,
        Pid,
        ConnStatus,
-       str(str=(
+       RawCallChain AS CallChain,
+       TextOrEmpty(X=get(item=ProcInfo,field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="Name")
          ||
          get(item=ProcInfo, member="name")
        )) AS ProcName,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="Exe")
          ||
          get(item=ProcInfo, member="exe")
        )) AS ProcExe,
-       str(str=(
+       TextOrEmpty(X=(
          get(item=ProcInfo, member="CommandLine")
          ||
          get(item=ProcInfo, member="cmdline")
@@ -2964,91 +3674,23 @@ WHERE CommandExecutionSocket
    OR PythonListener
    OR RiskyPortListener
 
-
-LET UniqueNetwork <=
-SELECT ClientId,
-       Fqdn,
-       Pid,
-       Laddr,
-       Lport,
-       Raddr,
-       Rport,
-       ConnStatus,
-       FindingWeight
-FROM NetworkMatches
-GROUP BY EvidenceKey
-
-
-LET NetworkByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
-         )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
-         )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount
-FROM UniqueNetwork
-GROUP BY ClientId
-
-
-LET SuspiciousNetwork <=
-SELECT ClientId,
-       Fqdn,
-       "Network" AS Category,
-       "Suspicious process and socket behavior" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM NetworkByHost
-WHERE EvidenceCount > 0
-
-
--- ============================================================
--- 6. Suspicious Cron jobs
--- ============================================================
-
 LET CronFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="User")) AS CronUser,
-       str(str=get(item=scope(), member="Event")) AS CronEvent,
-       str(str=get(item=scope(), member="Minute")) AS Minute,
-       str(str=get(item=scope(), member="Hour")) AS Hour,
-       str(str=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
-       str(str=get(item=scope(), member="Month")) AS Month,
-       str(str=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
-       str(str=get(item=scope(), member="Path")) AS CronPath,
-       str(str=get(item=scope(), member="Command")) AS CommandValue,
-       str(str=get(item=scope(), member="$Query")) AS QueryValue
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/Crontab"
@@ -3066,12 +3708,10 @@ SELECT ClientId,
        Month,
        DayOfWeek,
        CronPath,
-       if(
-         condition=CommandValue,
-         then=CommandValue,
-         else=QueryValue
-       ) AS CronCommand
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
 FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
 
 
 LET CronSignals <=
@@ -3099,37 +3739,16 @@ SELECT *,
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         )
        ) AS DirectWritableExecution,
 
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         )
        ) AS InterpretedWritableExecution,
 
        (
          CronCommand =~
            '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
-         OR
-         (
-           CronEvent =~ '''(?i)^@reboot$'''
-           AND
-           CronCommand =~
-             '''(?i)^\s*[A-Za-z_][A-Za-z0-9_-]*\s+(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
-         )
        ) AS InlineInterpreter,
 
        CronCommand =~
@@ -3188,10 +3807,12 @@ FROM ClassifiedCron
 LET CronMatches <=
 SELECT *,
        format(
-         format="%v|cron|%v|%v|%v|%v|%v|%v|%v",
+         format="%v|cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
          args=[
            ClientId,
            CronPath,
+           CronUser,
+           CronEvent,
            Minute,
            Hour,
            DayOfMonth,
@@ -3223,77 +3844,397 @@ WHERE CriticalCommand
    OR ScheduledRemoteFetch
 
 
-LET UniqueCron <=
-SELECT ClientId,
-       Fqdn,
-       CronPath,
-       CronCommand,
-       FindingWeight
+LET UserDetail <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_additional_uid0" AS SignalId,"Additional UID 0 account" AS Indicator,
+  FindingWeight,EvidenceKey,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,HomeDir AS Evidence3,UserShell AS Evidence4,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this additional UID 0 identity authorized for this server?" AS Hypothesis,
+  "Passwd configuration only; no proof of login or privilege use" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook,
+  UserName AS User,UserDescription AS Description,UserUid AS Uid,UserGid AS Gid,
+  HomeDir AS Homedir,UserShell AS Shell
+FROM UserMatches
+
+LET ProcessDetail <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_behavior" AS SignalId,
+  if(condition=DownloadPipeShell,then="Downloaded content piped to a shell",
+    else=if(condition=DecodePipeShell,then="Decoded content piped to a shell",
+      else=if(condition=NetcatExec OR SocatExec OR DevTcpShell,then="Command contains a shell/socket execution pattern",
+        else=if(condition=MiningPattern,then="Mining-related name or command pattern",
+          else=if(condition=WritablePathExe OR WritablePathExecution,then="Execution from a temporary path",
+            else=if(condition=UserRuntimeExecution,then="Execution from a user runtime path",
+              else=if(condition=NetcatTool OR SocatTool,then="Network utility in process command",
+                else="Python HTTP server command"))))))) AS Indicator,
+  FindingWeight,EvidenceKey,dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Name=ProcName,Hash=ProcHash,FlowId=RowFlowId,DownloadPipeShell=DownloadPipeShell,DecodePipeShell=DecodePipeShell,
+    NetcatExec=NetcatExec,SocatExec=SocatExec,DevTcpShell=DevTcpShell,MiningPattern=MiningPattern,
+    WritablePathExe=WritablePathExe,WritablePathExecution=WritablePathExecution,
+    UserRuntimeExecution=UserRuntimeExecution,NetcatTool=NetcatTool,SocatTool=SocatTool,
+    PythonHTTPServer=PythonHTTPServer) AS Evidence4,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate executable origin, server role and whether this command was authorized" AS Hypothesis,
+  "Command/name regex on a process snapshot; not a shell parser or confirmation of compromise" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook,
+  ProcPid AS Pid,ProcPpid AS Ppid,ProcName AS Name,ProcExe AS Exe,ProcCommandLine AS CommandLine,
+  ProcUsername AS Username,ProcHash AS Hash
+FROM ProcessMatches
+
+LET ServiceDetail <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_service_name_description" AS SignalId,
+  if(condition=ThreatAssociatedName,then="Service name matches a threat-associated watchlist",
+    else=if(condition=HighRiskDescription,then="Service description matches suspicious terminology",
+      else="Explicitly enabled lab service indicator")) AS Indicator,
+  FindingWeight,EvidenceKey,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(ThreatAssociatedName=ThreatAssociatedName,HighRiskDescription=HighRiskDescription,KnownLabService=KnownLabService) AS Evidence4,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this service name/description correspond to an unauthorized installed service?" AS Hypothesis,
+  "Only name, description and state are available. Priority weight is not confidence; collect the unit and executable to validate" AS ObservationLimit,
+  "LTH - 04 / LTH - 06" AS RecommendedNotebook,
+  ServiceUnit AS Unit,ServiceDescription AS Description,ServiceLoad AS Load,
+  ServiceActive AS Active,ServiceSub AS Sub
+FROM ServiceMatches
+
+LET NetworkDetail <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "baseline_process_socket" AS SignalId,
+  if(condition=CommandExecutionSocket,then="Socket-owning process has a command execution pattern",
+    else=if(condition=WritablePathSocket,then="Active socket with temporary-path execution context",
+      else=if(condition=NetworkToolListener OR NetworkToolConnection,then="Network utility listener or connection",
+        else=if(condition=PythonListener,then="Python HTTP listener",else="Non-loopback listener on a configured review port")))) AS Indicator,
+  FindingWeight,EvidenceKey,Pid AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,
+    Username=ProcUsername,CallChain=CallChain,
+    CommandExecutionSocket=CommandExecutionSocket,WritablePathSocket=WritablePathSocket,
+    NetworkToolListener=NetworkToolListener,NetworkToolConnection=NetworkToolConnection,
+    PythonListener=PythonListener,RiskyPortListener=RiskyPortListener) AS Evidence4,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this socket, associated command and peer expected for this host role?" AS Hypothesis,
+  "Socket snapshot; a port number does not identify a protocol or prove command-and-control" AS ObservationLimit,
+  "LTH - 05 - Network Connections Dashboard" AS RecommendedNotebook,
+  Laddr,Lport,Raddr,Rport,Pid,ConnStatus AS Status,ProcName,ProcExe,ProcCommandLine,ProcUsername,CallChain
+FROM NetworkMatches
+
+LET CronDetail <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_command" AS SignalId,
+  if(condition=CriticalCommand,then="Cron declares a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron declares execution from a temporary path",
+      else=if(condition=RepeatedRemoteFetch,then="Cron declares remote fetch at reboot or every minute",
+        else=if(condition=InlineInterpreter,then="Cron declares inline interpreter code",else="Cron declares remote fetch")))) AS Indicator,
+  FindingWeight,EvidenceKey,CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParseStatus=CronParseStatus,ParserVersion=CronParserVersion,
+    CriticalCommand=CriticalCommand,WritablePathExecution=WritablePathExecution,
+    RepeatedRemoteFetch=RepeatedRemoteFetch,InlineInterpreter=InlineInterpreter,ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this scheduled command authorized and is there separate evidence it executed?" AS Hypothesis,
+  "Declared command only; legacy parser rows may be incomplete. No cron runtime or complete shell semantics" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook,
+  CronUser,CronPath,CronCommand,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek
 FROM CronMatches
-GROUP BY EvidenceKey
+
+LET AccountSignals <= SELECT *,
+  UserShell =~ '''^/(tmp|var/tmp|dev/shm)/''' AS TemporaryShell,
+  (UserName="root" AND HomeDir =~ '''^/(tmp|var/tmp|dev/shm)/''') AS TemporaryRootHome,
+  (UserGid="0" AND UserUid!="0" AND UserUid!="") AS PrimaryRootGroup,
+  (UserName =~ '''^(www-data|apache|nginx|mysql|mariadb|postgres|redis|memcached|nobody)$'''
+   AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS ServiceInteractiveShell
+FROM UserFields
+
+LET AccountMatches <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_account_configuration" AS SignalId,
+  if(condition=TemporaryShell,then="Account declares a shell under a temporary directory",
+    else=if(condition=TemporaryRootHome,then="Root account declares a temporary home directory",
+      else=if(condition=PrimaryRootGroup,then="Non-root UID has primary GID 0",
+        else="Named service account has an interactive shell"))) AS Indicator,
+  if(condition=TemporaryShell,then=4,else=if(condition=TemporaryRootHome,then=3,else=2)) AS FindingWeight,
+  UserName AS Evidence1,dict(Uid=UserUid,Gid=UserGid) AS Evidence2,
+  UserShell AS Evidence3,dict(Home=HomeDir,TemporaryShell=TemporaryShell,
+    TemporaryRootHome=TemporaryRootHome,PrimaryRootGroup=PrimaryRootGroup,
+    ServiceInteractiveShell=ServiceInteractiveShell) AS Evidence4,
+  format(format="%v|account_config|%v|%v|%v|%v|%v",
+    args=[ClientId,UserName,UserUid,UserGid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate account role and whether this shell, group or home was authorized" AS Hypothesis,
+  "Configuration snapshot; does not establish a login or privilege use" AS ObservationLimit,
+  "LTH - 02 - Users Groups and Privileges Dashboard" AS RecommendedNotebook
+FROM AccountSignals
+WHERE TemporaryShell OR TemporaryRootHome OR PrimaryRootGroup OR ServiceInteractiveShell
+
+LET ProcessExtraFields <= SELECT *,
+  format(format="%v|%v|%v",args=[ClientId,RowFlowId,ProcPid]) AS ProcessLookupKey,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS CleanExe,
+  (ProcDeleted=TRUE OR ProcExe =~ '''\(deleted\)$''') AS IsDeleted,
+  ProcExe =~ '''^/?memfd:''' AS IsMemfd
+FROM ProcessFields
+
+LET ProcessIndex <= memoize(query={SELECT * FROM ProcessExtraFields},key="ProcessLookupKey")
+LET ProcessWithParent <= SELECT *,
+  get(item=ProcessIndex,field=format(format="%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPpid])) AS ParentProcess
+FROM ProcessExtraFields
+
+LET NewProcessSignals <= SELECT *,
+  (ParentProcess.ProcName =~ '''^(nginx|apache2|httpd|php-fpm[0-9.]*|uwsgi|gunicorn[0-9.: -]*)$'''
+   AND CleanExe =~ '''/(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|php[0-9.]*)$'''
+   AND ProcPpid!="0" AND ProcPpid!="") AS WebServiceChild,
+  (CleanExe =~ '''/ssh$'''
+   AND ProcCommandLine =~ '''(^|\s)(-(R|D)(\s|[0-9*\[:/])|-o\s*(RemoteForward|DynamicForward)\s*=)''') AS SSHForwarding
+FROM ProcessWithParent
+
+LET ExtraProcessMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_context" AS SignalId,
+  if(condition=IsMemfd,then="Process executable is backed by memfd",
+    else=if(condition=WebServiceChild,then="Shell or interpreter has a web-service parent in this snapshot",
+      else=if(condition=SSHForwarding,then="SSH process declares remote or dynamic forwarding",
+        else="Process executable is marked deleted"))) AS Indicator,
+  if(condition=IsMemfd,then=4,else=if(condition=WebServiceChild,then=3,else=2)) AS FindingWeight,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername,CreatedTime=ProcCreatedTime) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Deleted=IsDeleted,Memfd=IsMemfd,SSHForwarding=SSHForwarding,
+    WebServiceChild=WebServiceChild,ParentName=ParentProcess.ProcName,
+    ParentExe=ParentProcess.ProcExe,ParentCommandLine=ParentProcess.ProcCommandLine,
+    FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|process_context|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the executable, parent application behavior and authorized forwarding or updates" AS Hypothesis,
+  "Snapshot correlation; not historical process-creation evidence. Deleted binaries can follow normal updates" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook
+FROM NewProcessSignals
+WHERE IsMemfd OR WebServiceChild OR SSHForwarding OR IsDeleted
+
+LET CronScriptFiles <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=get(item=scope(),field="OSPath")) AS ScriptPath,
+  TextOrEmpty(X=get(item=scope(),field="Content")) AS ScriptContent,
+  get(item=scope(),field="Mtime") AS ScriptMtime,
+  get(item=scope(),field="FileSize") AS ScriptFileSize,
+  get(item=scope(),field="ContentLimit") AS ScriptContentLimit,
+  get(item=scope(),field="PotentiallyTruncated") AS ScriptPotentiallyTruncated
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Crontab")
+WHERE ScriptPath!="" AND ScriptContent!=""
+
+LET ScriptResults <= SELECT * FROM foreach(row=CronScriptFiles,query={
+  SELECT ClientId,Fqdn,ScriptPath,ScriptMtime,ScriptFileSize,ScriptContentLimit,ScriptPotentiallyTruncated,
+    _value AS CronCommand,(_key + 1) AS ScriptLineNumber,"" AS CronEvent,"" AS Minute,"" AS Hour
+  FROM items(item=split(string=ScriptContent,sep="\n"))
+})
+WHERE NOT CronCommand =~ '''^\s*(#|$)'''
+
+LET ScriptSignals <=
+SELECT *,
+       CronCommand =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       CronCommand =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       CronCommand =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
+
+       CronCommand =~
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
+         AS ScheduledRemoteFetch,
+
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
+       (
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM ScriptResults
 
 
-LET CronByHost <=
-SELECT ClientId,
-       Fqdn,
-       count() AS EvidenceCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 5,
-           then=1,
-           else=0
+LET ClassifiedScript <=
+SELECT *,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
          )
-       ) AS CriticalCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 4,
-           then=1,
-           else=0
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
          )
-       ) AS HighCount,
-       sum(
-         item=if(
-           condition=FindingWeight = 3,
-           then=1,
-           else=0
-         )
-       ) AS MediumCount
-FROM UniqueCron
-GROUP BY ClientId
+       ) AS RepeatedRemoteFetch
+FROM ScriptSignals
 
 
-LET SuspiciousCron <=
-SELECT ClientId,
-       Fqdn,
-       "Persistence" AS Category,
-       "Suspicious scheduled task" AS Indicator,
-       if(
-         condition=CriticalCount > 0,
-         then=5,
-         else=if(
-           condition=HighCount > 0,
-           then=4,
-           else=if(
-             condition=MediumCount > 0,
-             then=3,
-             else=2
-           )
-         )
-       ) AS Weight,
-       EvidenceCount,
-       0 AS SourceCollected
-FROM CronByHost
-WHERE EvidenceCount > 0
+LET ScoredScript <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedScript
 
 
--- ============================================================
--- 7. Source data coverage
---
--- A source is counted only when it returned at least one row.
--- Missing source rows require validation; they are not treated as
--- proof that the endpoint is clean or that collection failed.
--- ============================================================
 
+LET CronScriptMatches <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_script_content" AS SignalId,
+  if(condition=CriticalCommand,then="Cron script line contains a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron script line declares temporary-path execution",
+      else=if(condition=InlineInterpreter,then="Cron script line declares inline interpreter code",
+        else="Cron script line declares remote fetch"))) AS Indicator,
+  if(condition=CriticalCommand,then=5,else=if(condition=WritablePathExecution,then=4,
+    else=if(condition=InlineInterpreter,then=3,else=2))) AS FindingWeight,
+  ScriptPath AS Evidence1,ScriptLineNumber AS Evidence2,CronCommand AS Evidence3,
+  dict(Mtime=ScriptMtime,FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated,CriticalCommand=CriticalCommand,
+    WritablePathExecution=WritablePathExecution,InlineInterpreter=InlineInterpreter,
+    ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  format(format="%v|cron_script|%v|%v|%v",args=[ClientId,ScriptPath,ScriptLineNumber,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script invoked by cron/run-parts, and is the declared behavior authorized?" AS Hypothesis,
+  "Content prefix and line regex only; comments skipped, but strings/dead code may match. Existence does not prove execution" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook
+FROM ScoredScript
+WHERE CriticalCommand OR WritablePathExecution OR InlineInterpreter OR ScheduledRemoteFetch
+
+LET MountFields <= SELECT ClientId,Fqdn,Device,Mount,FSType,Options,
+  TextOrEmpty(X=(get(item=scope(),field="FlowId") || get(item=scope(),field="_FlowId"))) AS MountFlowId,
+  regex_replace(source=TextOrEmpty(X=Mount),re="/+$",replace="") AS MountPrefix
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Mounts")
+
+-- Resolve the longest matching mount, including normal nested mounts.
+-- Encoded mount paths require decoding before they can be correlated safely.
+LET MountFor(C,F,E) = SELECT *,len(list=MountPrefix) AS PrefixLength
+FROM MountFields
+WHERE ClientId=C AND MountFlowId=F AND TextOrEmpty(X=Mount)!=""
+  AND NOT TextOrEmpty(X=Mount) =~ '''\\[0-7]{3}'''
+  AND (E=MountPrefix OR split(string=E,sep_string=MountPrefix+"/")[0]="")
+ORDER BY PrefixLength DESC LIMIT 1
+
+LET MountProcessPaths <= SELECT *,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS ExecutablePath
+FROM ProcessFields
+WHERE ProcExe =~ '''^/(mnt|media|home|srv|opt|run/user)/'''
+
+LET ExecutableMounts <= SELECT *,
+  MountFor(C=ClientId,F=RowFlowId,E=ExecutablePath)[0] AS BackingMount
+FROM MountProcessPaths
+WHERE NOT ExecutablePath =~ '''[\s\\]'''
+
+LET MountExecutionMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_network_mount_execution" AS SignalId,
+  "Process executable path resolves to a network filesystem in this snapshot" AS Indicator,
+  2 AS FindingWeight,dict(Pid=ProcPid,Ppid=ProcPpid) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Mount=BackingMount.Mount,Device=BackingMount.Device,FSType=BackingMount.FSType,
+    Options=BackingMount.Options,SupportingArtifact="LTH.SystemBaseline/Mounts",FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|mounted_exe|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,BackingMount.Mount]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is executable code on this network share expected for this server role?" AS Hypothesis,
+  "Path-based, non-atomic snapshot correlation; process mount namespaces and mounts may differ" AS ObservationLimit,
+  "LTH - 01 / LTH - 04" AS RecommendedNotebook
+FROM ExecutableMounts
+WHERE BackingMount.FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountContext <= SELECT ClientId,Fqdn,"Mount Review" AS Category,
+  "baseline_network_mount_inventory" AS SignalId,
+  "Network filesystem available for hypothesis review" AS Indicator,
+  0 AS FindingWeight,Mount AS Evidence1,Device AS Evidence2,FSType AS Evidence3,
+  dict(Options=Options,FlowId=MountFlowId) AS Evidence4,
+  format(format="%v|%v|mount_context|%v|%v",args=[ClientId,MountFlowId,Mount,Device]) AS EvidenceKey,
+  "LTH.SystemBaseline/Mounts" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the share owner, purpose and which applications use it" AS Hypothesis,
+  "Mount inventory alone has weight zero and does not establish malicious use" AS ObservationLimit,
+  "LTH - 01 - System Baseline Dashboard" AS RecommendedNotebook
+FROM MountFields WHERE FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountReview <= SELECT * FROM chain(execution=MountExecutionMatches,context=MountContext)
+
+LET PackageRaw <= SELECT * FROM chain(
+  debian={SELECT *,"Debian" AS PackageFamily,"LTH.SystemBaseline/DebianPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/DebianPackages")},
+  rhel={SELECT *,"RHEL" AS PackageFamily,"LTH.SystemBaseline/RHELPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/RHELPackages")}
+)
+LET PackageFields <= SELECT ClientId,Fqdn,PackageFamily,PackageSource,
+  TextOrEmpty(X=(get(item=scope(),field="Package") || get(item=scope(),field="Name"))) AS PackageName,
+  TextOrEmpty(X=get(item=scope(),field="Version")) AS PackageVersion,
+  TextOrEmpty(X=(get(item=scope(),field="State") || get(item=scope(),field="Status"))) AS PackageState,
+  TextOrEmpty(X=get(item=scope(),field="Repository")) AS PackageRepository
+FROM PackageRaw
+LET InstalledPackages <= SELECT *,
+  regex_replace(source=PackageName,
+    re='''(\.(x86_64|i[3-6]86|noarch|aarch64|armv[0-9]+[a-z]*|ppc64le|s390x)|:[a-z0-9_-]+)$''',replace="") AS NormalizedPackage
+FROM PackageFields
+WHERE PackageName!="" AND (PackageFamily="RHEL" OR PackageState IN ("installed","active"))
+LET PackageContext <= SELECT ClientId,Fqdn,"Package Review" AS Category,
+  "baseline_dual_use_package_inventory" AS SignalId,
+  "Installed network, proxy or remote-access tooling for role review" AS Indicator,
+  0 AS FindingWeight,PackageName AS Evidence1,PackageVersion AS Evidence2,
+  dict(Family=PackageFamily,State=PackageState,Repository=PackageRepository) AS Evidence3,
+  "Installed software inventory does not establish execution, compromise, file ownership or vulnerability" AS Evidence4,
+  format(format="%v|package_context|%v|%v|%v",args=[ClientId,PackageSource,PackageName,PackageVersion]) AS EvidenceKey,
+  PackageSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this tool expected for the server role, and do process/network findings show relevant use?" AS Hypothesis,
+  "RHEL package names include architecture; removed Debian entries are excluded. No version-to-CVE inference" AS ObservationLimit,
+  "LTH - 01 / LTH - 04 / LTH - 05" AS RecommendedNotebook
+FROM InstalledPackages
+WHERE NormalizedPackage =~ '''^(nmap|nmap-ncat|ncat|netcat|netcat-openbsd|netcat-traditional|socat|masscan|proxychains|proxychains4|chisel|ngrok|frp|frpc|frps|rclone|openssh-clients|openssh-client)$'''
+
+LET SecurityServiceMatches <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_security_service_state" AS SignalId,
+  "A listed logging/audit service has an inactive or failed state" AS Indicator,
+  2 AS FindingWeight,ServiceUnit AS Evidence1,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence2,
+  ServiceDescription AS Evidence3,
+  "Review maintenance, configured logging architecture and service diagnostics" AS Evidence4,
+  format(format="%v|security_service_state|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this observed service state expected, or has logging continuity been affected?" AS Hypothesis,
+  "Only an existing row is evaluated; absence does not mean disabled. State does not establish tampering" AS ObservationLimit,
+  "LTH - 04 / LTH - 08" AS RecommendedNotebook
+FROM ServiceFields
+WHERE ServiceLoad="loaded" AND ServiceUnit =~ '''^(auditd|rsyslog|systemd-journald)\.service$'''
+  AND (ServiceActive IN ("failed","inactive") OR ServiceSub="failed")
 LET SourceCoverage <=
 SELECT *
 FROM chain(
@@ -3350,6 +4291,7 @@ FROM chain(
            0 AS EvidenceCount,
            1 AS SourceCollected
     FROM CronFields
+    WHERE CommandValue!="" OR CronContent!=""
     GROUP BY ClientId
   }
 )
@@ -3357,518 +4299,3065 @@ FROM chain(
 
 -- ============================================================
 -- 8. Merge category-level findings
--- ============================================================
+LET InventoryPlatform <= SELECT ClientId,Fqdn,TextOrEmpty(X=get(item=scope(),field="Platform")) AS Platform
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET PlatformFamilies <= SELECT *,
+  if(condition=Platform =~ '''(?i)^(ubuntu|debian|linuxmint|kali|raspbian|pop)$''',then="Debian",
+    else=if(condition=Platform =~ '''(?i)^(alma|almalinux|rocky|rhel|redhat|red hat.*|centos|ol|oracle|oraclelinux|fedora)$''',then="RHEL",else="Unknown")) AS ExpectedPackageFamily
+FROM InventoryPlatform
+LET PlatformIndex <= memoize(query={SELECT * FROM PlatformFamilies},key="ClientId")
+LET ApplicablePackages <= SELECT *,get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily AS ExpectedFamily
+FROM InstalledPackages
+WHERE PackageFamily=ExpectedFamily
 
-LET Findings <=
-SELECT *
-FROM chain(
-  coverage={
-    SELECT *
-    FROM Fleet
-  },
-  source_coverage={
-    SELECT *
-    FROM SourceCoverage
-  },
-  users={
-    SELECT *
-    FROM SuspiciousUsers
-  },
-  processes={
-    SELECT *
-    FROM SuspiciousProcesses
-  },
-  services={
-    SELECT *
-    FROM SuspiciousServices
-  },
-  network={
-    SELECT *
-    FROM SuspiciousNetwork
-  },
-  cron={
-    SELECT *
-    FROM SuspiciousCron
-  }
+LET ExtraCoverage <= SELECT * FROM chain(
+  mounts={SELECT ClientId,Fqdn,"Coverage" AS Category,"Mounts source returned rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM MountFields GROUP BY ClientId},
+  packages={SELECT ClientId,Fqdn,"Coverage" AS Category,"Applicable package family returned installed rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM ApplicablePackages GROUP BY ClientId}
 )
 
+LET SelectedScope <= SELECT ClientId,Fqdn FROM chain(
+  inventory=Fleet,users=UserFields,processes=ProcessFields,services=ServiceFields,
+  network=NetworkFields,cron=CronFields,mounts=MountFields,packages=PackageFields
+) GROUP BY ClientId
 
--- ============================================================
--- 9. Explain the exact score contribution of each area
---
--- Each triggered area contributes one value: its highest matched
--- weight. Therefore, the sum of ScoreContribution for a client
--- equals RiskScore in the Master Risk Score cell.
--- ============================================================
+LET CronQuality <= SELECT ClientId,
+  sum(item=if(condition=CommandValue!="" AND CronParserVersion!=2,then=1,else=0)) AS LegacyCronRows,
+  sum(item=if(condition=CronParseStatus="Unparsed",then=1,else=0)) AS UnparsedCronRows,
+  sum(item=if(condition=CronPotentiallyTruncated=TRUE,then=1,else=0)) AS TruncatedCronScripts
+FROM CronFields GROUP BY ClientId
+LET CronQualityIndex <= memoize(query={SELECT * FROM CronQuality},key="ClientId")
 
+LET AllEvidenceCandidates <= SELECT * FROM chain(
+  users=UserDetail,processes=ProcessDetail,services=ServiceDetail,network=NetworkDetail,cron=CronDetail,
+  accounts=AccountMatches,process_context=ExtraProcessMatches,cron_scripts=CronScriptMatches,
+  mounts=MountReview,packages=PackageContext,security_services=SecurityServiceMatches
+)
+LET AllEvidence <= SELECT * FROM AllEvidenceCandidates GROUP BY EvidenceKey
+LET PositiveEvidence <= SELECT * FROM AllEvidence WHERE FindingWeight>0
+
+-- Original five categories; cap each category at its highest matched weight.
+LET RiskAreas <= SELECT ClientId,Fqdn,Category,
+  "Highest matched weight in this existing area" AS Indicator,
+  max(item=FindingWeight) AS Weight,count() AS EvidenceCount,0 AS SourceCollected,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM PositiveEvidence GROUP BY AreaKey
+LET Findings <= SELECT * FROM chain(
+  all_clients={SELECT ClientId,Fqdn,"Coverage" AS Category,"Client has selected baseline data" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,0 AS SourceCollected FROM SelectedScope},
+  inventory=Fleet,source_coverage=SourceCoverage,added_coverage=ExtraCoverage,areas=RiskAreas
+)
+
+-- Edit to include your actual internal networks, including internally routed public ranges.
+-- A peer outside this list is not automatically Internet traffic or malicious.
+LET ReviewInternalCIDRs <= split(string="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",sep=",")
+
+LET ReviewMinCohortHosts <= 4
+LET ReviewMaxRareHosts <= 2
+LET ReviewMaxRarePercent <= 25
+
+LET AdminProcessSignals <= SELECT *,
+  ProcName =~ '''(?i)^ssh$''' AS RemoteClient,
+  ProcName =~ '''(?i)^(scp|sftp|rsync|rclone)$''' AS TransferTool,
+  ProcName =~ '''(?i)^(curl|wget)$''' AS FetchTool,
+  ProcName =~ '''(?i)^(nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS NetworkUtility,
+  (ProcUsername="root" AND ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS RootShell,
+  ProcName =~ '''(?i)^(sudo|su|doas)$''' AS PrivilegeUtility,
+  ProcCommandLine =~ '''(?i)(^|\s|/)(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)''' AS InlineCode,
+  (ProcName =~ '''(?i)^(screen|tmux|nohup)$'''
+   OR ProcCommandLine =~ '''(?i)^\s*(sudo\s+)?nohup\s''') AS BackgroundSession,
+  ProcExe =~ '''^/(usr/local|opt|srv|home|root|mnt|media)/''' AS ApplicationPathExe,
+  (ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|php[0-9.]*|ruby)$'''
+   AND ProcCommandLine =~ '''\s/(usr/local|opt|srv|home|root|mnt|media)/[^\s;&|]+''') AS InterpreterPathReference
+FROM ProcessFields
+
+LET AdministrativeProcessLeads <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "review_administrative_process" AS SignalId,
+  "Administrative, application-path or interpreter process to validate" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=RootShell OR PrivilegeUtility OR InlineCode OR TransferTool OR RemoteClient,then=2,else=1) AS ReviewPriority,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Name=ProcName,Username=ProcUsername,FlowId=RowFlowId) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(RemoteClient=RemoteClient,TransferTool=TransferTool,FetchTool=FetchTool,NetworkUtility=NetworkUtility,
+    RootShell=RootShell,PrivilegeUtility=PrivilegeUtility,InlineCode=InlineCode,BackgroundSession=BackgroundSession,
+    ApplicationPathExe=ApplicationPathExe,InterpreterPathReference=InterpreterPathReference) AS Evidence4,
+  format(format="%v|%v|review_process|%v|%v|%v",args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this observed command, account, path and peer fit the approved administration or application workflow?" AS Hypothesis,
+  "Identify the process owner and approved task; read parent and network context; validate the script or binary when needed" AS SuggestedChecks,
+  "Current process snapshot only. Root shell is not proof of an interactive session; an interpreter argument may reference data rather than executed code" AS ObservationLimit,
+  "LTH - 04 / LTH - 03 / LTH - 05" AS RecommendedNotebook
+FROM AdminProcessSignals
+WHERE RemoteClient OR TransferTool OR FetchTool OR NetworkUtility OR RootShell OR PrivilegeUtility
+   OR InlineCode OR BackgroundSession OR ApplicationPathExe OR InterpreterPathReference
+
+LET ReviewAccountSignals <= SELECT *,
+  (UserUid!="0" AND UserUid!="" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS NonRootShellAccount,
+  (UserUid!="0" AND UserUid!="" AND HomeDir =~ '''^/(root|opt|srv)(/|$)''') AS ApplicationHomeAccount
+FROM UserFields
+LET ReviewAccountLeads <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "review_account_role" AS SignalId,"Account shell or application home requires role confirmation" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,dict(Shell=UserShell,Home=HomeDir) AS Evidence3,
+  dict(NonRootShellAccount=NonRootShellAccount,ApplicationHomeAccount=ApplicationHomeAccount) AS Evidence4,
+  format(format="%v|review_account|%v|%v|%v|%v",args=[ClientId,UserName,UserUid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this account, shell and home required by a named person or application?" AS Hypothesis,
+  "Identify the account owner and intended role; request authentication or group evidence only if the hypothesis requires it" AS SuggestedChecks,
+  "Passwd snapshot: configured shell is not proof of login, and primary GID is not supplementary group membership" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook
+FROM ReviewAccountSignals WHERE NonRootShellAccount OR ApplicationHomeAccount
+
+LET ScheduledTaskLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_scheduled_command" AS SignalId,"Scheduled command for administrative-workflow review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=CronUser="root" OR CronEvent="@reboot" OR (Minute IN ("*","*/1") AND Hour="*"),then=2,else=1) AS ReviewPriority,
+  CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParserVersion=CronParserVersion,ParseStatus=CronParseStatus) AS Evidence4,
+  format(format="%v|review_cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,CronPath,CronUser,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this scheduled command, execution account and frequency belong to an approved job?" AS Hypothesis,
+  "Identify the job owner; validate its script and destination; use execution logs if proof of a run is needed" AS SuggestedChecks,
+  "Shows every nonempty parsed command, including legitimate maintenance. Legacy cron parsing may have lost the real command or user" AS ObservationLimit,
+  "LTH - 06 / LTH - 04" AS RecommendedNotebook
+FROM CronResults
+
+LET ScheduledScriptLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_cron_script" AS SignalId,"Periodic cron script content for purpose and ownership review" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ScriptPath AS Evidence1,ScriptContent AS Evidence2,
+  ScriptMtime AS Evidence3,dict(FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated) AS Evidence4,
+  format(format="%v|review_cron_script|%v|%v",args=[ClientId,ScriptPath,ScriptContent]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script expected in a periodic cron directory, and is it actually invoked by the configured scheduler?" AS Hypothesis,
+  "Review the collected content and owner; confirm run-parts eligibility and scheduler configuration if execution matters" AS SuggestedChecks,
+  "Only a collected content prefix; placement and Mtime do not prove execution or identify the modifier" AS ObservationLimit,
+  "LTH - 06" AS RecommendedNotebook
+FROM CronScriptFiles
+
+LET AccountScheduledLeads <= SELECT * FROM chain(accounts=ReviewAccountLeads,commands=ScheduledTaskLeads,scripts=ScheduledScriptLeads)
+
+LET ReviewNetworkFields <= SELECT *,
+  regex_replace(source=Laddr,re='''^\[|\]$''',replace="") AS ReviewLocalIP,
+  regex_replace(source=Raddr,re='''^\[|\]$''',replace="") AS ReviewPeerIP,
+  ConnStatus =~ '''(?i)^LISTEN(ING)?$''' AS ReviewListening,
+  ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$''' AS ReviewEstablished,
+  ProcName =~ '''(?i)^(ssh|scp|sftp|rsync|rclone|curl|wget|nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS ReviewAdministrativeTool
+FROM NetworkResults
+LET ReviewNetworkSignals <= SELECT *,
+  (ReviewListening AND cidr_contains(ip=ReviewLocalIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewLocalIP,ranges=["127.0.0.0/8","::1/128"])) AS NonLoopbackListener,
+  (ReviewEstablished AND ReviewAdministrativeTool
+    AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["127.0.0.0/8","::1/128","0.0.0.0/8","::/128"])) AS AdministrativeConnection,
+  (ReviewEstablished AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","224.0.0.0/4","240.0.0.0/4","::/128","::1/128","fe80::/10","ff00::/8"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=ReviewInternalCIDRs)) AS PeerOutsideConfiguredNetworks
+FROM ReviewNetworkFields
+LET NetworkReviewLeads <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "review_socket_role" AS SignalId,"Listener or established peer for role and administration review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=AdministrativeConnection OR PeerOutsideConfiguredNetworks,then=2,else=1) AS ReviewPriority,
+  dict(Pid=Pid,Name=ProcName,Username=ProcUsername) AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,CallChain=CallChain,
+    NonLoopbackListener=NonLoopbackListener,AdministrativeConnection=AdministrativeConnection,
+    PeerOutsideConfiguredNetworks=PeerOutsideConfiguredNetworks) AS Evidence4,
+  format(format="%v|review_socket|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,Pid,Laddr,Lport,Raddr,Rport,ConnStatus,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this process need this listening address or peer for its approved service or administrative task?" AS Hypothesis,
+  "Identify service and destination owners; confirm intended exposure and peer; correlate with the process and approved task" AS SuggestedChecks,
+  "Established sockets do not establish initiation direction. Wildcard listening does not prove Internet reachability; configured CIDRs are not a reputation check" AS ObservationLimit,
+  "LTH - 05 / LTH - 04" AS RecommendedNotebook
+FROM ReviewNetworkSignals
+WHERE NonLoopbackListener OR AdministrativeConnection OR PeerOutsideConfiguredNetworks
+
+LET ReviewServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(ssh|sshd|xrdp|xrdp-sesman|vncserver|tigervnc|telnet|rsh)([-.@][^ ]*)?\.service$''' AS RemoteAccessService,
+  ServiceUnit =~ '''(?i)^(docker|containerd|crio|cri-o|podman|kubelet)([-.@][^ ]*)?\.service$''' AS ContainerService,
+  ServiceUnit =~ '''(?i)^(nginx|apache2|httpd|mysql|mysqld|mariadb|postgresql|postgres|redis|redis-server|mongod|mongodb|elasticsearch)([-.@][^ ]*)?\.service$''' AS ApplicationDataService,
+  ServiceUnit =~ '''(?i)^(nfs|nfs-server|rpcbind|smb|smbd|nmb|nmbd|vsftpd|proftpd|pure-ftpd)([-.@][^ ]*)?\.service$''' AS FileSharingService
+FROM ServiceFields
+LET ActiveServiceLeads <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "review_active_service_role" AS SignalId,"Active access, application, container or file-sharing service" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(RemoteAccessService=RemoteAccessService,ContainerService=ContainerService,
+    ApplicationDataService=ApplicationDataService,FileSharingService=FileSharingService) AS Evidence4,
+  format(format="%v|review_service|%v|%v|%v",args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this active service required for the host role and is its access or data exposure intended?" AS Hypothesis,
+  "Confirm the service owner and purpose; inspect related listeners; collect unit configuration only for the selected hypothesis" AS SuggestedChecks,
+  "Observed loaded service state and naming only; no ExecStart, enablement, installed-package ownership or exposure proof" AS ObservationLimit,
+  "LTH - 04 / LTH - 05 / LTH - 12" AS RecommendedNotebook
+FROM ReviewServiceSignals
+WHERE ServiceLoad="loaded" AND ServiceActive="active"
+  AND (RemoteAccessService OR ContainerService OR ApplicationDataService OR FileSharingService)
+
+LET ReviewPlatforms <= SELECT ClientId,
+  (TextOrEmpty(X=get(item=scope(),field="Platform")) || "Unknown") AS ReviewCohort
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET ReviewPlatformIndex <= memoize(query={SELECT * FROM ReviewPlatforms},key="ClientId")
+
+-- Denominator is distinct clients that returned usable rows for this source,
+-- not all 16 scoped clients when some source results are missing.
+LET ReviewSourceClients <= SELECT * FROM chain(
+  processes={SELECT ClientId,"Process executable" AS Family FROM ProcessFields WHERE ProcExe!="" GROUP BY ClientId},
+  services={SELECT ClientId,"Service unit" AS Family FROM ServiceFields WHERE ServiceUnit!="" GROUP BY ClientId},
+  users={SELECT ClientId,"Shell account" AS Family FROM UserFields WHERE UserName!="" GROUP BY ClientId},
+  cron={SELECT ClientId,"Cron command" AS Family FROM CronResults GROUP BY ClientId}
+)
+LET ReviewSourceCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewSourceClients
+LET ReviewCoverage <= SELECT Family,ReviewCohort,count() AS CoveredHosts,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewSourceCohorts GROUP BY CohortKey
+LET ReviewCoverageIndex <= memoize(query={SELECT * FROM ReviewCoverage},key="CohortKey")
+
+LET ReviewObservations <= SELECT * FROM chain(
+  processes={SELECT ClientId,Fqdn,"Processes" AS Category,"Process executable" AS Family,
+    regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS Entity,
+    "LTH.SystemBaseline/Processes" AS ObservationSource FROM ProcessFields WHERE ProcExe!=""},
+  services={SELECT ClientId,Fqdn,"Services and Persistence" AS Category,"Service unit" AS Family,
+    ServiceUnit AS Entity,"LTH.SystemBaseline/Services" AS ObservationSource FROM ServiceFields WHERE ServiceUnit!=""},
+  users={SELECT ClientId,Fqdn,"Users and Privileges" AS Category,"Shell account" AS Family,
+    UserName+"|"+UserShell AS Entity,"LTH.SystemBaseline/Users" AS ObservationSource
+    FROM UserFields WHERE UserUid!="0" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$'''},
+  cron={SELECT ClientId,Fqdn,"Persistence" AS Category,"Cron command" AS Family,
+    CronUser+"|"+CronCommand AS Entity,"LTH.SystemBaseline/Crontab" AS ObservationSource FROM CronResults}
+)
+LET ReviewObservedCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewObservations
+LET ReviewUniqueHostEntities <= SELECT *,
+  format(format="%v|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS HostEntityKey,
+  format(format="%v|%v|%v",args=[ReviewCohort,Family,Entity]) AS PrevalenceKey,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewObservedCohorts GROUP BY HostEntityKey
+LET ReviewPrevalence <= SELECT PrevalenceKey,count() AS HostsWithEntity
+FROM ReviewUniqueHostEntities GROUP BY PrevalenceKey
+LET ReviewPrevalenceIndex <= memoize(query={SELECT * FROM ReviewPrevalence},key="PrevalenceKey")
+LET ReviewPrevalenceRows <= SELECT *,
+  get(item=ReviewCoverageIndex,field=CohortKey).CoveredHosts AS CoveredHosts,
+  get(item=ReviewPrevalenceIndex,field=PrevalenceKey).HostsWithEntity AS HostsWithEntity
+FROM ReviewUniqueHostEntities
+LET RareBaselineLeads <= SELECT ClientId,Fqdn,Category,
+  "review_low_prevalence" AS SignalId,"Low-prevalence baseline entity in the observed platform cohort" AS Indicator,
+  0 AS FindingWeight,2 AS ReviewPriority,Family AS Evidence1,Entity AS Evidence2,
+  dict(PlatformCohort=ReviewCohort,HostsWithEntity=HostsWithEntity,CoveredHosts=CoveredHosts) AS Evidence3,
+  "Compare approved roles before treating rarity as an anomaly; do not interpret as newly created" AS Evidence4,
+  format(format="%v|review_prevalence|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS EvidenceKey,
+  ObservationSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this uncommon executable, unit, account or scheduled command explained by this host's approved role?" AS Hypothesis,
+  "Compare with hosts having the same business role; identify owner and deployment purpose; inspect related baseline evidence" AS SuggestedChecks,
+  "One-Hunt prevalence among clients with source rows. Platform is not a business-role cohort; exact cron commands may contain host-specific values" AS ObservationLimit,
+  "LTH - 01 / the notebook for the observed family" AS RecommendedNotebook
+FROM ReviewPrevalenceRows
+WHERE ReviewCohort!="Unknown" AND CoveredHosts>=ReviewMinCohortHosts
+  AND HostsWithEntity<=ReviewMaxRareHosts
+  AND (HostsWithEntity * 100)<= (CoveredHosts * ReviewMaxRarePercent)
+
+LET AdditionalReviewCandidates <= SELECT * FROM chain(
+  admin=AdministrativeProcessLeads,account_cron=AccountScheduledLeads,
+  network=NetworkReviewLeads,services=ActiveServiceLeads,prevalence=RareBaselineLeads
+)
+LET EnhancedEvidenceCandidates <= SELECT * FROM chain(existing=AllEvidence,review=AdditionalReviewCandidates)
+LET EnhancedEvidence <= SELECT *,
+  if(condition=FindingWeight>0,then="Risk Indicator",else="Hunt Lead") AS EvidenceKind,
+  "Unreviewed" AS ReviewState,
+  if(condition=FindingWeight>=4,then=3,else=if(condition=FindingWeight>0,then=2,
+    else=(get(item=scope(),field="ReviewPriority") || 1))) AS ReviewPriority,
+  (get(item=scope(),field="SuggestedChecks") || Hypothesis) AS SuggestedChecks
+FROM EnhancedEvidenceCandidates GROUP BY EvidenceKey
+
+LET HuntLeadSummary <= SELECT ClientId,count() AS HuntLeadCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority
+FROM EnhancedEvidence GROUP BY ClientId
+LET HuntLeadIndex <= memoize(query={SELECT * FROM HuntLeadSummary},key="ClientId")
+LET FirstHuntLead(C) = SELECT Hypothesis FROM EnhancedEvidence WHERE ClientId=C ORDER BY ReviewPriority DESC LIMIT 1
+
+LET EvidenceAreas <= SELECT ClientId,Fqdn,Category,
+  max(item=FindingWeight) AS Weight,
+  sum(item=if(condition=FindingWeight>0,then=1,else=0)) AS EvidenceCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM EnhancedEvidence GROUP BY AreaKey
+LET HostScores <=
 SELECT ClientId,
        Fqdn,
-       Category AS HuntingArea,
-       Indicator,
-       if(
-         condition=Weight = 5,
-         then="Critical",
-         else=if(
-           condition=Weight = 4,
-           then="High",
-           else=if(
-             condition=Weight = 3,
-             then="Medium",
-             else="Low"
-           )
+       sum(
+         item=if(
+           condition=Weight > 0,
+           then=1,
+           else=0
          )
-       ) AS Severity,
-       Weight AS ScoreContribution,
-       EvidenceCount AS FindingCount,
+       ) AS TriggeredAreaCount,
+       sum(item=Weight) AS RiskScore,
+       sum(item=EvidenceCount) AS FindingEvidenceCount,
+       sum(
+         item=if(
+           condition=Weight = 5,
+           then=1,
+           else=0
+         )
+       ) AS CriticalAreaCount,
+       sum(item=SourceCollected) AS CollectedSourceCount
+FROM Findings
+GROUP BY ClientId
+
+LET ExtendedHostScores <=
+SELECT ClientId,
+       Fqdn,
+       TriggeredAreaCount,
+       RiskScore,
+       (get(item=HuntLeadIndex,field=ClientId).HuntLeadCount || 0) AS HuntLeadCount,
+       (get(item=HuntLeadIndex,field=ClientId).ReviewLeadCount || 0) AS ReviewLeadCount,
+       (get(item=HuntLeadIndex,field=ClientId).HighestReviewPriority || 0) AS HighestReviewPriority,
+       if(condition=RiskScore>0,then="Risk Indicators Found",
+         else=if(condition=get(item=HuntLeadIndex,field=ClientId).ReviewLeadCount>0,
+           then="Review Leads Available",else="Planned Hunt Needed")) AS HuntStatus,
+       (FirstHuntLead(C=ClientId)[0].Hypothesis || "Confirm host role and collection coverage; select a role-based hypothesis even when this snapshot has no lead") AS TopHuntHypothesis,
+       FindingEvidenceCount,
+       CriticalAreaCount,
+       CollectedSourceCount,
+       8 AS ExpectedSourceCount,
+       get(item=PlatformIndex,field=ClientId).Platform AS Platform,
+       (get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily || "Unknown") AS ExpectedPackageFamily,
+       (get(item=CronQualityIndex,field=ClientId).LegacyCronRows || 0) AS LegacyCronRows,
+       (get(item=CronQualityIndex,field=ClientId).UnparsedCronRows || 0) AS UnparsedCronRows,
+       (get(item=CronQualityIndex,field=ClientId).TruncatedCronScripts || 0) AS TruncatedCronScripts,
+       if(condition=get(item=CronQualityIndex,field=ClientId).LegacyCronRows>0
+           OR get(item=CronQualityIndex,field=ClientId).UnparsedCronRows>0,
+         then="Cron parser review required; read RawLine or recollect with parser v2",
+         else="No detected parser warning; row presence does not establish complete collection") AS DataQualityStatus,
        if(
-         condition=Category = "Users and Privileges",
-         then="LTH - 02 - Users Groups and Privileges Dashboard",
+         condition=CollectedSourceCount = 8,
+         then="Selected sources returned rows; inspect collection logs for errors",
+         else=format(
+           format="Validate empty sources - %v of 8 selected source groups returned rows",
+           args=[CollectedSourceCount]
+         )
+       ) AS CollectionStatus,
+       if(
+         condition=RiskScore = 0
+                   AND (CollectedSourceCount < 8
+                     OR get(item=CronQualityIndex,field=ClientId).LegacyCronRows>0
+                     OR get(item=CronQualityIndex,field=ClientId).UnparsedCronRows>0),
+         then="Collection Review",
          else=if(
-           condition=Category = "Processes",
-           then="LTH - 04 - Processes and Services Dashboard",
+           condition=RiskScore = 0,
+           then="No Matched Finding",
            else=if(
-             condition=Category = "Services and Persistence",
-             then="LTH - 04 - Processes and Services Dashboard; then LTH - 06 - Persistence Mechanisms Dashboard",
+             condition=CriticalAreaCount > 0
+                   OR RiskScore >= 10,
+             then="High",
              else=if(
-               condition=Category = "Network",
-               then="LTH - 05 - Network Connections Dashboard",
-               else="LTH - 06 - Persistence Mechanisms Dashboard"
+               condition=RiskScore >= 6,
+               then="Suspicious",
+               else=if(
+                 condition=RiskScore >= 3,
+                 then="Review",
+                 else="Low"
+               )
              )
            )
          )
-       ) AS RecommendedNotebook
-FROM Findings
-WHERE Weight > 0
-ORDER BY Fqdn
+       ) AS RiskLevel
+FROM HostScores
+
+SELECT * FROM ExtendedHostScores ORDER BY RiskScore DESC
+
 ```
 
-## Cell 9 — Triage Findings Detail
+## Cell 28 (markdown)
 
-Provides an additional raw-evidence view for analyst validation.
+# Evidence Behind the Score
 
-Analysts must validate the process, command, account, service, network endpoint, or Cron entry before classifying the result as malicious or benign.
+Shows how each hunting area contributes to the client risk score. Coverage rows confirm that a source returned data and have no effect on the score. Finding rows represent investigation candidates, not confirmed incidents.
 
-This table is not used directly to calculate RiskScore. Use Evidence Behind the Score for the exact contribution of each hunting area.
+## Cell 29 (vql)
 
 ```vql
 LET HuntId <= "HUNT_ID"
 
--- ============================================================
--- 1. Raw source rows
--- ============================================================
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+-- Keep this FALSE on the production server, consistently in all cells.
+LET EnableLabIndicators <= FALSE
 
-LET UserRows =
+
+LET Fleet <= SELECT ClientId,Fqdn,"Coverage" AS Category,"Basic information source returned rows" AS Indicator,
+  0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET UserFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="User")) AS UserName,
-       get(item=scope(), member="Uid") AS UserUid,
-       str(str=get(item=scope(), member="Shell")) AS UserShell,
-       str(str=get(item=scope(), member="Homedir")) AS UserHome
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="User")
+         ||
+         get(item=scope(), member="Username")
+       )) AS UserName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Homedir")
+         ||
+         get(item=scope(), member="HomeDir")
+         ||
+         get(item=scope(), member="Home")
+       )) AS HomeDir
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/Users"
 )
 
 
-LET ProcessRows =
+LET UserMatches <=
+SELECT *,
+       format(
+         format="%v|uid0|%v|%v",
+         args=[ClientId, UserName, HomeDir]
+       ) AS EvidenceKey,
+       5 AS FindingWeight
+FROM UserFields
+WHERE UserUid = "0"
+  AND NOT UserName =~ '''^root$'''
+  AND NOT (
+    UserName = ""
+    AND HomeDir = "/root"
+  )
+
+LET ProcessFields <=
 SELECT ClientId,
        Fqdn,
-       get(item=scope(), member="Pid") AS ProcessPid,
-       str(str=get(item=scope(), member="Name")) AS ProcessName,
-       str(str=get(item=scope(), member="Exe")) AS ProcessExe,
-       str(str=get(item=scope(), member="CommandLine")) AS ProcessCommand,
-       get(item=scope(), member="Deleted") AS DeletedValue
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Pid")
+         ||
+         get(item=scope(), member="PID")
+       )) AS ProcPid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Ppid")
+         ||
+         get(item=scope(), member="PPid")
+         ||
+         get(item=scope(), member="PPID")
+       )) AS ProcPpid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="ProcessName")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Exe")
+         ||
+         get(item=scope(), member="Executable")
+         ||
+         get(item=scope(), member="Path")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=scope(), member="CommandLine")
+         ||
+         get(item=scope(), member="Cmdline")
+         ||
+         get(item=scope(), member="cmdline")
+         ||
+         get(item=scope(), member="Command")
+       )) AS ProcCommandLine
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/Processes"
 )
 
 
-LET ServiceRows =
+LET ProcessSignals <=
+SELECT *,
+       ProcCommandLine =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       ProcCommandLine =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       ProcCommandLine =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       ProcExe =~
+         '''(?i)^/(tmp|var/tmp|dev/shm)/'''
+         AS WritablePathExe,
+
+       (
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+         OR
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS WritablePathExecution,
+
+       (
+         ProcName =~ '''(?i)^(nc|ncat)$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)(nc|ncat)(\s|$)'''
+       ) AS NetcatTool,
+
+       (
+         ProcName =~ '''(?i)^socat$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)socat(\s|$)'''
+       ) AS SocatTool,
+
+       ProcCommandLine =~
+         '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
+         AS PythonHTTPServer,
+       ProcExe =~ '''(?i)^/run/user/[0-9]+/''' AS UserRuntimeExecution,
+       (ProcName =~ '''(?i)^(xmrig|minerd|kinsing|kdevtmpfsi)$'''
+        OR ProcCommandLine =~ '''(?i)(xmrig|stratum\+tcp)''') AS MiningPattern
+FROM ProcessFields
+
+
+LET ProcessMatches <=
+SELECT *,
+       format(
+         format="%v|process|%v|%v|%v",
+         args=[ClientId, ProcPid, ProcExe, ProcCommandLine]
+       ) AS EvidenceKey,
+
+       if(
+         condition=DownloadPipeShell
+                   OR DecodePipeShell
+                   OR NetcatExec
+                   OR SocatExec
+                   OR DevTcpShell,
+         then=5,
+         else=if(
+           condition=WritablePathExe
+                     OR WritablePathExecution
+                     OR MiningPattern
+                     OR (UserRuntimeExecution AND PythonHTTPServer),
+           then=4,
+           else=if(
+             condition=NetcatTool
+                       OR SocatTool
+                       OR UserRuntimeExecution,
+             then=3,
+             else=2
+           )
+         )
+       ) AS FindingWeight
+FROM ProcessSignals
+WHERE DownloadPipeShell
+   OR DecodePipeShell
+   OR NetcatExec
+   OR SocatExec
+   OR DevTcpShell
+   OR WritablePathExe
+   OR WritablePathExecution
+   OR NetcatTool
+   OR SocatTool
+   OR PythonHTTPServer
+   OR UserRuntimeExecution
+   OR MiningPattern
+
+
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
+
+LET ServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(kinsing|xmrig|kdevtmpfsi|watchbog)([-_.@][a-z0-9_.@-]+)?\.service$''' AS ThreatAssociatedName,
+  ServiceDescription =~ '''(?i)(cryptocurrency[ -](miner|mining)|reverse[ -]shell|backdoor[ -]service|unauthorized[ -]remote[ -]access)''' AS HighRiskDescription,
+  (EnableLabIndicators AND
+   (ServiceUnit =~ '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
+    OR ServiceDescription =~ '''(?i)(lab persistence|temporary update service|remote support lab)''')) AS KnownLabService
+FROM ServiceFields
+
+LET ServiceMatches <= SELECT *,
+  format(format="%v|service|%v|%v|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceDescription,ServiceLoad,ServiceActive,ServiceSub]) AS EvidenceKey,
+  if(condition=ThreatAssociatedName,then=5,else=4) AS FindingWeight
+FROM ServiceSignals
+WHERE ThreatAssociatedName OR HighRiskDescription OR KnownLabService
+
+LET NetworkFields <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="Unit")) AS ServiceUnit,
-       str(str=get(item=scope(), member="Active")) AS ServiceActive,
-       str(str=get(item=scope(), member="Sub")) AS ServiceSub,
-       str(str=get(item=scope(), member="Description")) AS ServiceDescription
-FROM hunt_results(
-  hunt_id=HuntId,
-  artifact="LTH.SystemBaseline/Services"
-)
-
-
-LET NetworkRows =
-SELECT ClientId,
-       Fqdn,
-       get(item=scope(), member="Pid") AS NetworkPid,
-       str(str=get(item=scope(), member="Status")) AS NetworkStatus,
-       str(str=get(item=scope(), member="Laddr")) AS LocalAddress,
-       get(item=scope(), member="Lport") AS LocalPort,
-       str(str=get(item=scope(), member="Raddr")) AS RemoteAddress,
-       get(item=scope(), member="Rport") AS RemotePort,
-
-       str(str=get(
-         item=get(item=scope(), member="ProcInfo"),
-         member="Exe"
-       )) AS NetworkProcessExe,
-
-       str(str=get(
-         item=get(item=scope(), member="ProcInfo"),
-         member="CommandLine"
-       )) AS NetworkProcessCommand
-
+       TextOrEmpty(X=get(item=scope(),field="CallChain")) AS RawCallChain,
+       TextOrEmpty(X=get(item=scope(), member="Laddr")) AS Laddr,
+       TextOrEmpty(X=get(item=scope(), member="Lport")) AS Lport,
+       TextOrEmpty(X=get(item=scope(), member="Raddr")) AS Raddr,
+       TextOrEmpty(X=get(item=scope(), member="Rport")) AS Rport,
+       TextOrEmpty(X=get(item=scope(), member="Pid")) AS Pid,
+       TextOrEmpty(X=get(item=scope(), member="Status")) AS ConnStatus,
+       get(item=scope(), member="ProcInfo") AS ProcInfo
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/NetworkConnections"
 )
 
 
-LET CronRows =
+LET NetworkResults <=
 SELECT ClientId,
        Fqdn,
-       str(str=get(item=scope(), member="User")) AS CronUser,
-       str(str=get(item=scope(), member="Path")) AS CronPath,
-       str(str=get(item=scope(), member="Event")) AS CronEvent,
-       str(str=get(item=scope(), member="Minute")) AS CronMinute,
-       str(str=get(item=scope(), member="Hour")) AS CronHour,
-
-       str(str=(
-         get(item=scope(), member="Command")
+       Laddr,
+       Lport,
+       Raddr,
+       Rport,
+       Pid,
+       ConnStatus,
+       RawCallChain AS CallChain,
+       TextOrEmpty(X=get(item=ProcInfo,field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Name")
          ||
-         get(item=scope(), member="$Query")
-       )) AS CronCommand
+         get(item=ProcInfo, member="name")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Exe")
+         ||
+         get(item=ProcInfo, member="exe")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="CommandLine")
+         ||
+         get(item=ProcInfo, member="cmdline")
+       )) AS ProcCommandLine
+FROM NetworkFields
 
+
+LET NetworkSignals <=
+SELECT *,
+       ConnStatus =~ '''(?i)^(LISTEN|LISTENING)$'''
+         AS IsListening,
+
+       ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$'''
+         AS IsEstablished,
+
+       Laddr =~ '''^(127\.|::1$|\[::1\]$)'''
+         AS LoopbackBind,
+
+       Lport =~ '''^(4444|5555)$'''
+         AS HighRiskPort,
+
+       ProcExe =~ '''(?i)^/(tmp|var/tmp|dev/shm)/'''
+         AS WritablePathExe,
+
+       (
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+         OR
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS WritablePathExecution,
+
+       (
+         ProcName =~ '''(?i)^(nc|ncat)$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)(nc|ncat)(\s|$)'''
+       ) AS NetcatTool,
+
+       (
+         ProcName =~ '''(?i)^socat$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)socat(\s|$)'''
+       ) AS SocatTool,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       ProcCommandLine =~
+         '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
+         AS PythonHTTPServer
+FROM NetworkResults
+
+
+LET ClassifiedNetwork <=
+SELECT *,
+       NetcatExec
+       OR SocatExec
+         AS CommandExecutionSocket,
+
+       (
+         (IsListening OR IsEstablished)
+         AND
+         (WritablePathExe OR WritablePathExecution)
+       ) AS WritablePathSocket,
+
+       (
+         IsListening
+         AND
+         (NetcatTool OR SocatTool)
+       ) AS NetworkToolListener,
+
+       (
+         IsEstablished
+         AND
+         (NetcatTool OR SocatTool)
+       ) AS NetworkToolConnection,
+
+       (
+         IsListening
+         AND
+         PythonHTTPServer
+       ) AS PythonListener,
+
+       (
+         IsListening
+         AND
+         HighRiskPort
+         AND
+         NOT LoopbackBind
+       ) AS RiskyPortListener
+FROM NetworkSignals
+
+
+LET NetworkMatches <=
+SELECT *,
+       format(
+         format="%v|network|%v|%v|%v|%v|%v|%v",
+         args=[
+           ClientId,
+           Pid,
+           Laddr,
+           Lport,
+           Raddr,
+           Rport,
+           ConnStatus
+         ]
+       ) AS EvidenceKey,
+
+       if(
+         condition=CommandExecutionSocket,
+         then=5,
+         else=if(
+           condition=WritablePathSocket
+                     OR (
+                       PythonListener
+                       AND RiskyPortListener
+                     ),
+           then=4,
+           else=if(
+             condition=NetworkToolListener
+                       OR NetworkToolConnection,
+             then=3,
+             else=2
+           )
+         )
+       ) AS FindingWeight
+FROM ClassifiedNetwork
+WHERE CommandExecutionSocket
+   OR WritablePathSocket
+   OR NetworkToolListener
+   OR NetworkToolConnection
+   OR PythonListener
+   OR RiskyPortListener
+
+LET CronFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
 FROM hunt_results(
   hunt_id=HuntId,
   artifact="LTH.SystemBaseline/Crontab"
 )
 
--- ============================================================
--- 2. Process signals
--- ============================================================
 
-LET ProcessSignals =
-SELECT *,
-       (
-         DeletedValue = TRUE
-         OR
-         str(str=DeletedValue) =~ '''(?i)^(1|true|yes|y)$'''
-       ) AS DeletedExecutable,
-
-       ProcessExe =~
-         '''(?i)^/(tmp|var/tmp|dev/shm)/'''
-         AS WritablePathExecution,
-
-       ProcessCommand =~
-         '''(?i)(bash\s+-i|/dev/(tcp|udp)/|(nc|ncat|netcat)\s+[^\r\n]{0,500}\s(-e|-c)(\s|$)|socat\s+[^\r\n]{0,500}(EXEC|SYSTEM):|base64\s+(-d|--decode)[^|]{0,500}[|]\s*(ba|da|z|k)?sh)'''
-         AS SuspiciousCommandChain
-
-FROM ProcessRows
-
--- ============================================================
--- 3. Network signals
--- ============================================================
+LET CronResults <=
+SELECT ClientId,
+       Fqdn,
+       CronUser,
+       CronEvent,
+       Minute,
+       Hour,
+       DayOfMonth,
+       Month,
+       DayOfWeek,
+       CronPath,
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
+FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
 
 
-LET NetworkSignals =
-SELECT *,
-       NetworkStatus =~
-         '''(?i)^(ESTAB|ESTABLISHED|LISTEN)$'''
-         AS ActiveSocket,
-
-       NetworkProcessExe =~
-         '''(?i)^/(tmp|var/tmp|dev/shm)/'''
-         AS WritableProcess,
-
-       RemotePort =~
-         '''^(4444|1337|31337|9001|9002)$'''
-         AS UncommonRemotePort,
-
-       NetworkProcessCommand =~
-         '''(?i)(bash\s+-i|/dev/(tcp|udp)/|(nc|ncat|netcat)\s+[^\r\n]{0,500}\s(-e|-c)(\s|$)|socat\s+[^\r\n]{0,500}(EXEC|SYSTEM):)'''
-         AS ReverseShellCommand,
-
-       NetworkProcessCommand =~
-         '''(?i)(^|[\s/])(nc|ncat|netcat|socat|bash|sh|python[0-9.]*|perl|ruby)(\s|$)'''
-         AS SuspiciousNetworkTool
-
-FROM NetworkRows
--- ============================================================
--- 4. Cron signals
--- ============================================================
-
-LET CronSignals =
+LET CronSignals <=
 SELECT *,
        CronCommand =~
-         '''(?i)(curl|wget)[^|]{0,500}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
          AS DownloadPipeShell,
 
        CronCommand =~
-         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,500}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
          AS DecodePipeShell,
 
        CronCommand =~
-         '''(?i)(^|\s|/)(nc|ncat|netcat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
-         AS NetcatExecution,
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
 
        CronCommand =~
          '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
-         AS SocatExecution,
+         AS SocatExec,
 
        CronCommand =~
          '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
          AS DevTcpShell,
 
-       CronCommand =~
-         '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?((/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
-         AS WritableCronExecution,
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
 
        CronCommand =~
-         '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
-         AS InlineInterpreter,
-
-       CronCommand =~
-         '''(?i)(curl|wget)[^\r\n]{0,500}(https?|ftp)://'''
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
          AS ScheduledRemoteFetch,
 
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
        (
-         CronEvent =~ '''(?i)^@reboot$'''
-         OR
-         (
-           CronMinute =~ '''^(\*|\*/1)$'''
-           AND CronHour = "*"
-         )
-       ) AS StartupOrFrequent
-
-FROM CronRows
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM CronResults
 
 
-LET CronCorrelated =
+LET ClassifiedCron <=
 SELECT *,
-       (
-         DownloadPipeShell
-         OR DecodePipeShell
-         OR NetcatExecution
-         OR SocatExecution
-         OR DevTcpShell
-       ) AS CriticalCronChain,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
 
        (
          ScheduledRemoteFetch
-         AND StartupOrFrequent
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
+         )
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
+         )
        ) AS RepeatedRemoteFetch
-
 FROM CronSignals
--- ============================================================
--- 5. Finding rows
--- ============================================================
 
 
-LET UserFindings =
-SELECT ClientId,
-       Fqdn,
-       "Users & Privileges" AS HuntingArea,
-       "Unexpected UID 0 account" AS Indicator,
-       "High" AS Severity,
-       5 AS Weight,
-       UserName AS Evidence1,
-       UserUid AS Evidence2,
-       UserShell AS Evidence3,
-       UserHome AS Evidence4,
-       "LTH - 02 - Users Groups and Privileges Dashboard"
-         AS RecommendedNotebook
-FROM UserRows
-WHERE UserUid = 0
-  AND UserName != "root"
+LET ScoredCron <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedCron
 
 
-LET ProcessFindings =
-SELECT ClientId,
-       Fqdn,
-       "Processes & Services" AS HuntingArea,
-
-       if(
-         condition=DeletedExecutable,
-         then="Deleted executable is still running",
-         else=if(
-           condition=WritablePathExecution,
-           then="Process executing from a writable temporary path",
-           else="Suspicious process command chain"
-         )
-       ) AS Indicator,
-
-       "High" AS Severity,
-       5 AS Weight,
-       ProcessPid AS Evidence1,
-       ProcessExe AS Evidence2,
-       ProcessCommand AS Evidence3,
-       ProcessName AS Evidence4,
-       "LTH - 04 - Processes and Services Dashboard"
-         AS RecommendedNotebook
-
-FROM ProcessSignals
-WHERE DeletedExecutable
-   OR WritablePathExecution
-   OR SuspiciousCommandChain
-
-
-LET ServiceFindings =
-SELECT ClientId,
-       Fqdn,
-       "Processes & Services" AS HuntingArea,
-       "Suspicious active service" AS Indicator,
-       "Medium" AS Severity,
-       3 AS Weight,
-       ServiceUnit AS Evidence1,
-       ServiceActive AS Evidence2,
-       ServiceDescription AS Evidence3,
-       ServiceSub AS Evidence4,
-       "LTH - 04 - Processes and Services Dashboard"
-         AS RecommendedNotebook
-
-FROM ServiceRows
-WHERE ServiceActive =~ '''(?i)^active$'''
-  AND (
-       ServiceUnit =~
-         '''(?i)(ngrok|chisel|xmrig|miner|backdoor|reverse.?shell|netcat|ncat|socat|frpc|frps)'''
-       OR
-       ServiceDescription =~
-         '''(?i)(ngrok|chisel|xmrig|miner|backdoor|reverse.?shell|netcat|ncat|socat|frpc|frps)'''
-  )
-
-
-LET NetworkFindings =
-SELECT ClientId,
-       Fqdn,
-       "Network Connections" AS HuntingArea,
+LET CronMatches <=
+SELECT *,
+       format(
+         format="%v|cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+         args=[
+           ClientId,
+           CronPath,
+           CronUser,
+           CronEvent,
+           Minute,
+           Hour,
+           DayOfMonth,
+           Month,
+           DayOfWeek,
+           CronCommand
+         ]
+       ) AS EvidenceKey,
 
        if(
-         condition=WritableProcess,
-         then="Network activity from a writable-path executable",
-         else=if(
-           condition=ReverseShellCommand,
-           then="Possible reverse-shell network activity",
-           else="Suspicious tool communicating over an uncommon port"
-         )
-       ) AS Indicator,
-
-       if(
-         condition=WritableProcess OR ReverseShellCommand,
-         then="High",
-         else="Medium"
-       ) AS Severity,
-
-       if(
-         condition=WritableProcess OR ReverseShellCommand,
+         condition=CriticalCommand,
          then=5,
-         else=3
-       ) AS Weight,
-
-       NetworkPid AS Evidence1,
-       NetworkProcessExe AS Evidence2,
-       NetworkProcessCommand AS Evidence3,
-
-       dict(
-         RemoteAddress=RemoteAddress,
-         RemotePort=RemotePort,
-         Status=NetworkStatus
-       ) AS Evidence4,
-
-       "LTH - 05 - Network Connections Dashboard"
-         AS RecommendedNotebook
-
-FROM NetworkSignals
-WHERE ActiveSocket
-  AND (
-       WritableProcess
-       OR ReverseShellCommand
-       OR (
-            UncommonRemotePort
-            AND SuspiciousNetworkTool
-          )
-  )
-
-
-LET CronFindings =
-SELECT ClientId,
-       Fqdn,
-       "Persistence - Cron" AS HuntingArea,
-
-       if(
-         condition=CriticalCronChain,
-         then="High-confidence malicious Cron command chain",
          else=if(
-           condition=WritableCronExecution,
-           then="Cron execution from a writable temporary path",
+           condition=WritablePathExecution
+                     OR RepeatedRemoteFetch,
+           then=4,
            else=if(
-             condition=RepeatedRemoteFetch,
-             then="Remote content retrieved at startup or every minute",
-             else="Inline interpreter execution from Cron"
+             condition=InlineInterpreter,
+             then=3,
+             else=2
            )
          )
-       ) AS Indicator,
-
-       if(
-         condition=CriticalCronChain,
-         then="High",
-         else="Medium"
-       ) AS Severity,
-
-       if(
-         condition=CriticalCronChain,
-         then=5,
-         else=3
-       ) AS Weight,
-
-       CronUser AS Evidence1,
-       CronPath AS Evidence2,
-       CronCommand AS Evidence3,
-
-       dict(
-         Event=CronEvent,
-         Minute=CronMinute,
-         Hour=CronHour
-       ) AS Evidence4,
-
-       "LTH - 06 - Persistence Mechanisms Dashboard"
-         AS RecommendedNotebook
-
-FROM CronCorrelated
-WHERE CriticalCronChain
-   OR WritableCronExecution
+       ) AS FindingWeight
+FROM ScoredCron
+WHERE CriticalCommand
+   OR WritablePathExecution
    OR RepeatedRemoteFetch
    OR InlineInterpreter
+   OR ScheduledRemoteFetch
 
 
-LET Findings =
+LET UserDetail <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_additional_uid0" AS SignalId,"Additional UID 0 account" AS Indicator,
+  FindingWeight,EvidenceKey,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,HomeDir AS Evidence3,UserShell AS Evidence4,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this additional UID 0 identity authorized for this server?" AS Hypothesis,
+  "Passwd configuration only; no proof of login or privilege use" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook,
+  UserName AS User,UserDescription AS Description,UserUid AS Uid,UserGid AS Gid,
+  HomeDir AS Homedir,UserShell AS Shell
+FROM UserMatches
+
+LET ProcessDetail <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_behavior" AS SignalId,
+  if(condition=DownloadPipeShell,then="Downloaded content piped to a shell",
+    else=if(condition=DecodePipeShell,then="Decoded content piped to a shell",
+      else=if(condition=NetcatExec OR SocatExec OR DevTcpShell,then="Command contains a shell/socket execution pattern",
+        else=if(condition=MiningPattern,then="Mining-related name or command pattern",
+          else=if(condition=WritablePathExe OR WritablePathExecution,then="Execution from a temporary path",
+            else=if(condition=UserRuntimeExecution,then="Execution from a user runtime path",
+              else=if(condition=NetcatTool OR SocatTool,then="Network utility in process command",
+                else="Python HTTP server command"))))))) AS Indicator,
+  FindingWeight,EvidenceKey,dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Name=ProcName,Hash=ProcHash,FlowId=RowFlowId,DownloadPipeShell=DownloadPipeShell,DecodePipeShell=DecodePipeShell,
+    NetcatExec=NetcatExec,SocatExec=SocatExec,DevTcpShell=DevTcpShell,MiningPattern=MiningPattern,
+    WritablePathExe=WritablePathExe,WritablePathExecution=WritablePathExecution,
+    UserRuntimeExecution=UserRuntimeExecution,NetcatTool=NetcatTool,SocatTool=SocatTool,
+    PythonHTTPServer=PythonHTTPServer) AS Evidence4,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate executable origin, server role and whether this command was authorized" AS Hypothesis,
+  "Command/name regex on a process snapshot; not a shell parser or confirmation of compromise" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook,
+  ProcPid AS Pid,ProcPpid AS Ppid,ProcName AS Name,ProcExe AS Exe,ProcCommandLine AS CommandLine,
+  ProcUsername AS Username,ProcHash AS Hash
+FROM ProcessMatches
+
+LET ServiceDetail <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_service_name_description" AS SignalId,
+  if(condition=ThreatAssociatedName,then="Service name matches a threat-associated watchlist",
+    else=if(condition=HighRiskDescription,then="Service description matches suspicious terminology",
+      else="Explicitly enabled lab service indicator")) AS Indicator,
+  FindingWeight,EvidenceKey,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(ThreatAssociatedName=ThreatAssociatedName,HighRiskDescription=HighRiskDescription,KnownLabService=KnownLabService) AS Evidence4,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this service name/description correspond to an unauthorized installed service?" AS Hypothesis,
+  "Only name, description and state are available. Priority weight is not confidence; collect the unit and executable to validate" AS ObservationLimit,
+  "LTH - 04 / LTH - 06" AS RecommendedNotebook,
+  ServiceUnit AS Unit,ServiceDescription AS Description,ServiceLoad AS Load,
+  ServiceActive AS Active,ServiceSub AS Sub
+FROM ServiceMatches
+
+LET NetworkDetail <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "baseline_process_socket" AS SignalId,
+  if(condition=CommandExecutionSocket,then="Socket-owning process has a command execution pattern",
+    else=if(condition=WritablePathSocket,then="Active socket with temporary-path execution context",
+      else=if(condition=NetworkToolListener OR NetworkToolConnection,then="Network utility listener or connection",
+        else=if(condition=PythonListener,then="Python HTTP listener",else="Non-loopback listener on a configured review port")))) AS Indicator,
+  FindingWeight,EvidenceKey,Pid AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,
+    Username=ProcUsername,CallChain=CallChain,
+    CommandExecutionSocket=CommandExecutionSocket,WritablePathSocket=WritablePathSocket,
+    NetworkToolListener=NetworkToolListener,NetworkToolConnection=NetworkToolConnection,
+    PythonListener=PythonListener,RiskyPortListener=RiskyPortListener) AS Evidence4,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this socket, associated command and peer expected for this host role?" AS Hypothesis,
+  "Socket snapshot; a port number does not identify a protocol or prove command-and-control" AS ObservationLimit,
+  "LTH - 05 - Network Connections Dashboard" AS RecommendedNotebook,
+  Laddr,Lport,Raddr,Rport,Pid,ConnStatus AS Status,ProcName,ProcExe,ProcCommandLine,ProcUsername,CallChain
+FROM NetworkMatches
+
+LET CronDetail <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_command" AS SignalId,
+  if(condition=CriticalCommand,then="Cron declares a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron declares execution from a temporary path",
+      else=if(condition=RepeatedRemoteFetch,then="Cron declares remote fetch at reboot or every minute",
+        else=if(condition=InlineInterpreter,then="Cron declares inline interpreter code",else="Cron declares remote fetch")))) AS Indicator,
+  FindingWeight,EvidenceKey,CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParseStatus=CronParseStatus,ParserVersion=CronParserVersion,
+    CriticalCommand=CriticalCommand,WritablePathExecution=WritablePathExecution,
+    RepeatedRemoteFetch=RepeatedRemoteFetch,InlineInterpreter=InlineInterpreter,ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this scheduled command authorized and is there separate evidence it executed?" AS Hypothesis,
+  "Declared command only; legacy parser rows may be incomplete. No cron runtime or complete shell semantics" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook,
+  CronUser,CronPath,CronCommand,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek
+FROM CronMatches
+
+LET AccountSignals <= SELECT *,
+  UserShell =~ '''^/(tmp|var/tmp|dev/shm)/''' AS TemporaryShell,
+  (UserName="root" AND HomeDir =~ '''^/(tmp|var/tmp|dev/shm)/''') AS TemporaryRootHome,
+  (UserGid="0" AND UserUid!="0" AND UserUid!="") AS PrimaryRootGroup,
+  (UserName =~ '''^(www-data|apache|nginx|mysql|mariadb|postgres|redis|memcached|nobody)$'''
+   AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS ServiceInteractiveShell
+FROM UserFields
+
+LET AccountMatches <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_account_configuration" AS SignalId,
+  if(condition=TemporaryShell,then="Account declares a shell under a temporary directory",
+    else=if(condition=TemporaryRootHome,then="Root account declares a temporary home directory",
+      else=if(condition=PrimaryRootGroup,then="Non-root UID has primary GID 0",
+        else="Named service account has an interactive shell"))) AS Indicator,
+  if(condition=TemporaryShell,then=4,else=if(condition=TemporaryRootHome,then=3,else=2)) AS FindingWeight,
+  UserName AS Evidence1,dict(Uid=UserUid,Gid=UserGid) AS Evidence2,
+  UserShell AS Evidence3,dict(Home=HomeDir,TemporaryShell=TemporaryShell,
+    TemporaryRootHome=TemporaryRootHome,PrimaryRootGroup=PrimaryRootGroup,
+    ServiceInteractiveShell=ServiceInteractiveShell) AS Evidence4,
+  format(format="%v|account_config|%v|%v|%v|%v|%v",
+    args=[ClientId,UserName,UserUid,UserGid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate account role and whether this shell, group or home was authorized" AS Hypothesis,
+  "Configuration snapshot; does not establish a login or privilege use" AS ObservationLimit,
+  "LTH - 02 - Users Groups and Privileges Dashboard" AS RecommendedNotebook
+FROM AccountSignals
+WHERE TemporaryShell OR TemporaryRootHome OR PrimaryRootGroup OR ServiceInteractiveShell
+
+LET ProcessExtraFields <= SELECT *,
+  format(format="%v|%v|%v",args=[ClientId,RowFlowId,ProcPid]) AS ProcessLookupKey,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS CleanExe,
+  (ProcDeleted=TRUE OR ProcExe =~ '''\(deleted\)$''') AS IsDeleted,
+  ProcExe =~ '''^/?memfd:''' AS IsMemfd
+FROM ProcessFields
+
+LET ProcessIndex <= memoize(query={SELECT * FROM ProcessExtraFields},key="ProcessLookupKey")
+LET ProcessWithParent <= SELECT *,
+  get(item=ProcessIndex,field=format(format="%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPpid])) AS ParentProcess
+FROM ProcessExtraFields
+
+LET NewProcessSignals <= SELECT *,
+  (ParentProcess.ProcName =~ '''^(nginx|apache2|httpd|php-fpm[0-9.]*|uwsgi|gunicorn[0-9.: -]*)$'''
+   AND CleanExe =~ '''/(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|php[0-9.]*)$'''
+   AND ProcPpid!="0" AND ProcPpid!="") AS WebServiceChild,
+  (CleanExe =~ '''/ssh$'''
+   AND ProcCommandLine =~ '''(^|\s)(-(R|D)(\s|[0-9*\[:/])|-o\s*(RemoteForward|DynamicForward)\s*=)''') AS SSHForwarding
+FROM ProcessWithParent
+
+LET ExtraProcessMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_context" AS SignalId,
+  if(condition=IsMemfd,then="Process executable is backed by memfd",
+    else=if(condition=WebServiceChild,then="Shell or interpreter has a web-service parent in this snapshot",
+      else=if(condition=SSHForwarding,then="SSH process declares remote or dynamic forwarding",
+        else="Process executable is marked deleted"))) AS Indicator,
+  if(condition=IsMemfd,then=4,else=if(condition=WebServiceChild,then=3,else=2)) AS FindingWeight,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername,CreatedTime=ProcCreatedTime) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Deleted=IsDeleted,Memfd=IsMemfd,SSHForwarding=SSHForwarding,
+    WebServiceChild=WebServiceChild,ParentName=ParentProcess.ProcName,
+    ParentExe=ParentProcess.ProcExe,ParentCommandLine=ParentProcess.ProcCommandLine,
+    FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|process_context|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the executable, parent application behavior and authorized forwarding or updates" AS Hypothesis,
+  "Snapshot correlation; not historical process-creation evidence. Deleted binaries can follow normal updates" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook
+FROM NewProcessSignals
+WHERE IsMemfd OR WebServiceChild OR SSHForwarding OR IsDeleted
+
+LET CronScriptFiles <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=get(item=scope(),field="OSPath")) AS ScriptPath,
+  TextOrEmpty(X=get(item=scope(),field="Content")) AS ScriptContent,
+  get(item=scope(),field="Mtime") AS ScriptMtime,
+  get(item=scope(),field="FileSize") AS ScriptFileSize,
+  get(item=scope(),field="ContentLimit") AS ScriptContentLimit,
+  get(item=scope(),field="PotentiallyTruncated") AS ScriptPotentiallyTruncated
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Crontab")
+WHERE ScriptPath!="" AND ScriptContent!=""
+
+LET ScriptResults <= SELECT * FROM foreach(row=CronScriptFiles,query={
+  SELECT ClientId,Fqdn,ScriptPath,ScriptMtime,ScriptFileSize,ScriptContentLimit,ScriptPotentiallyTruncated,
+    _value AS CronCommand,(_key + 1) AS ScriptLineNumber,"" AS CronEvent,"" AS Minute,"" AS Hour
+  FROM items(item=split(string=ScriptContent,sep="\n"))
+})
+WHERE NOT CronCommand =~ '''^\s*(#|$)'''
+
+LET ScriptSignals <=
+SELECT *,
+       CronCommand =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       CronCommand =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       CronCommand =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
+
+       CronCommand =~
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
+         AS ScheduledRemoteFetch,
+
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
+       (
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM ScriptResults
+
+
+LET ClassifiedScript <=
+SELECT *,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
+         )
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
+         )
+       ) AS RepeatedRemoteFetch
+FROM ScriptSignals
+
+
+LET ScoredScript <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedScript
+
+
+
+LET CronScriptMatches <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_script_content" AS SignalId,
+  if(condition=CriticalCommand,then="Cron script line contains a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron script line declares temporary-path execution",
+      else=if(condition=InlineInterpreter,then="Cron script line declares inline interpreter code",
+        else="Cron script line declares remote fetch"))) AS Indicator,
+  if(condition=CriticalCommand,then=5,else=if(condition=WritablePathExecution,then=4,
+    else=if(condition=InlineInterpreter,then=3,else=2))) AS FindingWeight,
+  ScriptPath AS Evidence1,ScriptLineNumber AS Evidence2,CronCommand AS Evidence3,
+  dict(Mtime=ScriptMtime,FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated,CriticalCommand=CriticalCommand,
+    WritablePathExecution=WritablePathExecution,InlineInterpreter=InlineInterpreter,
+    ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  format(format="%v|cron_script|%v|%v|%v",args=[ClientId,ScriptPath,ScriptLineNumber,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script invoked by cron/run-parts, and is the declared behavior authorized?" AS Hypothesis,
+  "Content prefix and line regex only; comments skipped, but strings/dead code may match. Existence does not prove execution" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook
+FROM ScoredScript
+WHERE CriticalCommand OR WritablePathExecution OR InlineInterpreter OR ScheduledRemoteFetch
+
+LET MountFields <= SELECT ClientId,Fqdn,Device,Mount,FSType,Options,
+  TextOrEmpty(X=(get(item=scope(),field="FlowId") || get(item=scope(),field="_FlowId"))) AS MountFlowId,
+  regex_replace(source=TextOrEmpty(X=Mount),re="/+$",replace="") AS MountPrefix
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Mounts")
+
+-- Resolve the longest matching mount, including normal nested mounts.
+-- Encoded mount paths require decoding before they can be correlated safely.
+LET MountFor(C,F,E) = SELECT *,len(list=MountPrefix) AS PrefixLength
+FROM MountFields
+WHERE ClientId=C AND MountFlowId=F AND TextOrEmpty(X=Mount)!=""
+  AND NOT TextOrEmpty(X=Mount) =~ '''\\[0-7]{3}'''
+  AND (E=MountPrefix OR split(string=E,sep_string=MountPrefix+"/")[0]="")
+ORDER BY PrefixLength DESC LIMIT 1
+
+LET MountProcessPaths <= SELECT *,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS ExecutablePath
+FROM ProcessFields
+WHERE ProcExe =~ '''^/(mnt|media|home|srv|opt|run/user)/'''
+
+LET ExecutableMounts <= SELECT *,
+  MountFor(C=ClientId,F=RowFlowId,E=ExecutablePath)[0] AS BackingMount
+FROM MountProcessPaths
+WHERE NOT ExecutablePath =~ '''[\s\\]'''
+
+LET MountExecutionMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_network_mount_execution" AS SignalId,
+  "Process executable path resolves to a network filesystem in this snapshot" AS Indicator,
+  2 AS FindingWeight,dict(Pid=ProcPid,Ppid=ProcPpid) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Mount=BackingMount.Mount,Device=BackingMount.Device,FSType=BackingMount.FSType,
+    Options=BackingMount.Options,SupportingArtifact="LTH.SystemBaseline/Mounts",FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|mounted_exe|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,BackingMount.Mount]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is executable code on this network share expected for this server role?" AS Hypothesis,
+  "Path-based, non-atomic snapshot correlation; process mount namespaces and mounts may differ" AS ObservationLimit,
+  "LTH - 01 / LTH - 04" AS RecommendedNotebook
+FROM ExecutableMounts
+WHERE BackingMount.FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountContext <= SELECT ClientId,Fqdn,"Mount Review" AS Category,
+  "baseline_network_mount_inventory" AS SignalId,
+  "Network filesystem available for hypothesis review" AS Indicator,
+  0 AS FindingWeight,Mount AS Evidence1,Device AS Evidence2,FSType AS Evidence3,
+  dict(Options=Options,FlowId=MountFlowId) AS Evidence4,
+  format(format="%v|%v|mount_context|%v|%v",args=[ClientId,MountFlowId,Mount,Device]) AS EvidenceKey,
+  "LTH.SystemBaseline/Mounts" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the share owner, purpose and which applications use it" AS Hypothesis,
+  "Mount inventory alone has weight zero and does not establish malicious use" AS ObservationLimit,
+  "LTH - 01 - System Baseline Dashboard" AS RecommendedNotebook
+FROM MountFields WHERE FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountReview <= SELECT * FROM chain(execution=MountExecutionMatches,context=MountContext)
+
+LET PackageRaw <= SELECT * FROM chain(
+  debian={SELECT *,"Debian" AS PackageFamily,"LTH.SystemBaseline/DebianPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/DebianPackages")},
+  rhel={SELECT *,"RHEL" AS PackageFamily,"LTH.SystemBaseline/RHELPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/RHELPackages")}
+)
+LET PackageFields <= SELECT ClientId,Fqdn,PackageFamily,PackageSource,
+  TextOrEmpty(X=(get(item=scope(),field="Package") || get(item=scope(),field="Name"))) AS PackageName,
+  TextOrEmpty(X=get(item=scope(),field="Version")) AS PackageVersion,
+  TextOrEmpty(X=(get(item=scope(),field="State") || get(item=scope(),field="Status"))) AS PackageState,
+  TextOrEmpty(X=get(item=scope(),field="Repository")) AS PackageRepository
+FROM PackageRaw
+LET InstalledPackages <= SELECT *,
+  regex_replace(source=PackageName,
+    re='''(\.(x86_64|i[3-6]86|noarch|aarch64|armv[0-9]+[a-z]*|ppc64le|s390x)|:[a-z0-9_-]+)$''',replace="") AS NormalizedPackage
+FROM PackageFields
+WHERE PackageName!="" AND (PackageFamily="RHEL" OR PackageState IN ("installed","active"))
+LET PackageContext <= SELECT ClientId,Fqdn,"Package Review" AS Category,
+  "baseline_dual_use_package_inventory" AS SignalId,
+  "Installed network, proxy or remote-access tooling for role review" AS Indicator,
+  0 AS FindingWeight,PackageName AS Evidence1,PackageVersion AS Evidence2,
+  dict(Family=PackageFamily,State=PackageState,Repository=PackageRepository) AS Evidence3,
+  "Installed software inventory does not establish execution, compromise, file ownership or vulnerability" AS Evidence4,
+  format(format="%v|package_context|%v|%v|%v",args=[ClientId,PackageSource,PackageName,PackageVersion]) AS EvidenceKey,
+  PackageSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this tool expected for the server role, and do process/network findings show relevant use?" AS Hypothesis,
+  "RHEL package names include architecture; removed Debian entries are excluded. No version-to-CVE inference" AS ObservationLimit,
+  "LTH - 01 / LTH - 04 / LTH - 05" AS RecommendedNotebook
+FROM InstalledPackages
+WHERE NormalizedPackage =~ '''^(nmap|nmap-ncat|ncat|netcat|netcat-openbsd|netcat-traditional|socat|masscan|proxychains|proxychains4|chisel|ngrok|frp|frpc|frps|rclone|openssh-clients|openssh-client)$'''
+
+LET SecurityServiceMatches <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_security_service_state" AS SignalId,
+  "A listed logging/audit service has an inactive or failed state" AS Indicator,
+  2 AS FindingWeight,ServiceUnit AS Evidence1,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence2,
+  ServiceDescription AS Evidence3,
+  "Review maintenance, configured logging architecture and service diagnostics" AS Evidence4,
+  format(format="%v|security_service_state|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this observed service state expected, or has logging continuity been affected?" AS Hypothesis,
+  "Only an existing row is evaluated; absence does not mean disabled. State does not establish tampering" AS ObservationLimit,
+  "LTH - 04 / LTH - 08" AS RecommendedNotebook
+FROM ServiceFields
+WHERE ServiceLoad="loaded" AND ServiceUnit =~ '''^(auditd|rsyslog|systemd-journald)\.service$'''
+  AND (ServiceActive IN ("failed","inactive") OR ServiceSub="failed")
+LET SourceCoverage <=
 SELECT *
 FROM chain(
-  users=UserFindings,
-  processes=ProcessFindings,
-  services=ServiceFindings,
-  network=NetworkFindings,
-  cron=CronFindings
+  users={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Users source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM UserFields
+    GROUP BY ClientId
+  },
+  processes={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Processes source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM ProcessFields
+    GROUP BY ClientId
+  },
+  services={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Services source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM ServiceFields
+    GROUP BY ClientId
+  },
+  network={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Network source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM NetworkFields
+    GROUP BY ClientId
+  },
+  cron={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Cron source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM CronFields
+    WHERE CommandValue!="" OR CronContent!=""
+    GROUP BY ClientId
+  }
 )
 
 
-SELECT ClientId,
-       Fqdn,
-       HuntingArea,
-       Severity,
-       Indicator,
-       Evidence1,
-       Evidence2,
-       Evidence3,
-       Evidence4,
-       RecommendedNotebook
-FROM Findings
-ORDER BY Fqdn
+-- ============================================================
+-- 8. Merge category-level findings
+LET InventoryPlatform <= SELECT ClientId,Fqdn,TextOrEmpty(X=get(item=scope(),field="Platform")) AS Platform
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET PlatformFamilies <= SELECT *,
+  if(condition=Platform =~ '''(?i)^(ubuntu|debian|linuxmint|kali|raspbian|pop)$''',then="Debian",
+    else=if(condition=Platform =~ '''(?i)^(alma|almalinux|rocky|rhel|redhat|red hat.*|centos|ol|oracle|oraclelinux|fedora)$''',then="RHEL",else="Unknown")) AS ExpectedPackageFamily
+FROM InventoryPlatform
+LET PlatformIndex <= memoize(query={SELECT * FROM PlatformFamilies},key="ClientId")
+LET ApplicablePackages <= SELECT *,get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily AS ExpectedFamily
+FROM InstalledPackages
+WHERE PackageFamily=ExpectedFamily
+
+LET ExtraCoverage <= SELECT * FROM chain(
+  mounts={SELECT ClientId,Fqdn,"Coverage" AS Category,"Mounts source returned rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM MountFields GROUP BY ClientId},
+  packages={SELECT ClientId,Fqdn,"Coverage" AS Category,"Applicable package family returned installed rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM ApplicablePackages GROUP BY ClientId}
+)
+
+LET SelectedScope <= SELECT ClientId,Fqdn FROM chain(
+  inventory=Fleet,users=UserFields,processes=ProcessFields,services=ServiceFields,
+  network=NetworkFields,cron=CronFields,mounts=MountFields,packages=PackageFields
+) GROUP BY ClientId
+
+LET CronQuality <= SELECT ClientId,
+  sum(item=if(condition=CommandValue!="" AND CronParserVersion!=2,then=1,else=0)) AS LegacyCronRows,
+  sum(item=if(condition=CronParseStatus="Unparsed",then=1,else=0)) AS UnparsedCronRows,
+  sum(item=if(condition=CronPotentiallyTruncated=TRUE,then=1,else=0)) AS TruncatedCronScripts
+FROM CronFields GROUP BY ClientId
+LET CronQualityIndex <= memoize(query={SELECT * FROM CronQuality},key="ClientId")
+
+LET AllEvidenceCandidates <= SELECT * FROM chain(
+  users=UserDetail,processes=ProcessDetail,services=ServiceDetail,network=NetworkDetail,cron=CronDetail,
+  accounts=AccountMatches,process_context=ExtraProcessMatches,cron_scripts=CronScriptMatches,
+  mounts=MountReview,packages=PackageContext,security_services=SecurityServiceMatches
+)
+LET AllEvidence <= SELECT * FROM AllEvidenceCandidates GROUP BY EvidenceKey
+LET PositiveEvidence <= SELECT * FROM AllEvidence WHERE FindingWeight>0
+
+-- Original five categories; cap each category at its highest matched weight.
+LET RiskAreas <= SELECT ClientId,Fqdn,Category,
+  "Highest matched weight in this existing area" AS Indicator,
+  max(item=FindingWeight) AS Weight,count() AS EvidenceCount,0 AS SourceCollected,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM PositiveEvidence GROUP BY AreaKey
+LET Findings <= SELECT * FROM chain(
+  all_clients={SELECT ClientId,Fqdn,"Coverage" AS Category,"Client has selected baseline data" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,0 AS SourceCollected FROM SelectedScope},
+  inventory=Fleet,source_coverage=SourceCoverage,added_coverage=ExtraCoverage,areas=RiskAreas
+)
+
+-- Edit to include your actual internal networks, including internally routed public ranges.
+-- A peer outside this list is not automatically Internet traffic or malicious.
+LET ReviewInternalCIDRs <= split(string="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",sep=",")
+
+LET ReviewMinCohortHosts <= 4
+LET ReviewMaxRareHosts <= 2
+LET ReviewMaxRarePercent <= 25
+
+LET AdminProcessSignals <= SELECT *,
+  ProcName =~ '''(?i)^ssh$''' AS RemoteClient,
+  ProcName =~ '''(?i)^(scp|sftp|rsync|rclone)$''' AS TransferTool,
+  ProcName =~ '''(?i)^(curl|wget)$''' AS FetchTool,
+  ProcName =~ '''(?i)^(nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS NetworkUtility,
+  (ProcUsername="root" AND ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS RootShell,
+  ProcName =~ '''(?i)^(sudo|su|doas)$''' AS PrivilegeUtility,
+  ProcCommandLine =~ '''(?i)(^|\s|/)(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)''' AS InlineCode,
+  (ProcName =~ '''(?i)^(screen|tmux|nohup)$'''
+   OR ProcCommandLine =~ '''(?i)^\s*(sudo\s+)?nohup\s''') AS BackgroundSession,
+  ProcExe =~ '''^/(usr/local|opt|srv|home|root|mnt|media)/''' AS ApplicationPathExe,
+  (ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|php[0-9.]*|ruby)$'''
+   AND ProcCommandLine =~ '''\s/(usr/local|opt|srv|home|root|mnt|media)/[^\s;&|]+''') AS InterpreterPathReference
+FROM ProcessFields
+
+LET AdministrativeProcessLeads <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "review_administrative_process" AS SignalId,
+  "Administrative, application-path or interpreter process to validate" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=RootShell OR PrivilegeUtility OR InlineCode OR TransferTool OR RemoteClient,then=2,else=1) AS ReviewPriority,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Name=ProcName,Username=ProcUsername,FlowId=RowFlowId) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(RemoteClient=RemoteClient,TransferTool=TransferTool,FetchTool=FetchTool,NetworkUtility=NetworkUtility,
+    RootShell=RootShell,PrivilegeUtility=PrivilegeUtility,InlineCode=InlineCode,BackgroundSession=BackgroundSession,
+    ApplicationPathExe=ApplicationPathExe,InterpreterPathReference=InterpreterPathReference) AS Evidence4,
+  format(format="%v|%v|review_process|%v|%v|%v",args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this observed command, account, path and peer fit the approved administration or application workflow?" AS Hypothesis,
+  "Identify the process owner and approved task; read parent and network context; validate the script or binary when needed" AS SuggestedChecks,
+  "Current process snapshot only. Root shell is not proof of an interactive session; an interpreter argument may reference data rather than executed code" AS ObservationLimit,
+  "LTH - 04 / LTH - 03 / LTH - 05" AS RecommendedNotebook
+FROM AdminProcessSignals
+WHERE RemoteClient OR TransferTool OR FetchTool OR NetworkUtility OR RootShell OR PrivilegeUtility
+   OR InlineCode OR BackgroundSession OR ApplicationPathExe OR InterpreterPathReference
+
+LET ReviewAccountSignals <= SELECT *,
+  (UserUid!="0" AND UserUid!="" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS NonRootShellAccount,
+  (UserUid!="0" AND UserUid!="" AND HomeDir =~ '''^/(root|opt|srv)(/|$)''') AS ApplicationHomeAccount
+FROM UserFields
+LET ReviewAccountLeads <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "review_account_role" AS SignalId,"Account shell or application home requires role confirmation" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,dict(Shell=UserShell,Home=HomeDir) AS Evidence3,
+  dict(NonRootShellAccount=NonRootShellAccount,ApplicationHomeAccount=ApplicationHomeAccount) AS Evidence4,
+  format(format="%v|review_account|%v|%v|%v|%v",args=[ClientId,UserName,UserUid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this account, shell and home required by a named person or application?" AS Hypothesis,
+  "Identify the account owner and intended role; request authentication or group evidence only if the hypothesis requires it" AS SuggestedChecks,
+  "Passwd snapshot: configured shell is not proof of login, and primary GID is not supplementary group membership" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook
+FROM ReviewAccountSignals WHERE NonRootShellAccount OR ApplicationHomeAccount
+
+LET ScheduledTaskLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_scheduled_command" AS SignalId,"Scheduled command for administrative-workflow review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=CronUser="root" OR CronEvent="@reboot" OR (Minute IN ("*","*/1") AND Hour="*"),then=2,else=1) AS ReviewPriority,
+  CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParserVersion=CronParserVersion,ParseStatus=CronParseStatus) AS Evidence4,
+  format(format="%v|review_cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,CronPath,CronUser,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this scheduled command, execution account and frequency belong to an approved job?" AS Hypothesis,
+  "Identify the job owner; validate its script and destination; use execution logs if proof of a run is needed" AS SuggestedChecks,
+  "Shows every nonempty parsed command, including legitimate maintenance. Legacy cron parsing may have lost the real command or user" AS ObservationLimit,
+  "LTH - 06 / LTH - 04" AS RecommendedNotebook
+FROM CronResults
+
+LET ScheduledScriptLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_cron_script" AS SignalId,"Periodic cron script content for purpose and ownership review" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ScriptPath AS Evidence1,ScriptContent AS Evidence2,
+  ScriptMtime AS Evidence3,dict(FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated) AS Evidence4,
+  format(format="%v|review_cron_script|%v|%v",args=[ClientId,ScriptPath,ScriptContent]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script expected in a periodic cron directory, and is it actually invoked by the configured scheduler?" AS Hypothesis,
+  "Review the collected content and owner; confirm run-parts eligibility and scheduler configuration if execution matters" AS SuggestedChecks,
+  "Only a collected content prefix; placement and Mtime do not prove execution or identify the modifier" AS ObservationLimit,
+  "LTH - 06" AS RecommendedNotebook
+FROM CronScriptFiles
+
+LET AccountScheduledLeads <= SELECT * FROM chain(accounts=ReviewAccountLeads,commands=ScheduledTaskLeads,scripts=ScheduledScriptLeads)
+
+LET ReviewNetworkFields <= SELECT *,
+  regex_replace(source=Laddr,re='''^\[|\]$''',replace="") AS ReviewLocalIP,
+  regex_replace(source=Raddr,re='''^\[|\]$''',replace="") AS ReviewPeerIP,
+  ConnStatus =~ '''(?i)^LISTEN(ING)?$''' AS ReviewListening,
+  ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$''' AS ReviewEstablished,
+  ProcName =~ '''(?i)^(ssh|scp|sftp|rsync|rclone|curl|wget|nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS ReviewAdministrativeTool
+FROM NetworkResults
+LET ReviewNetworkSignals <= SELECT *,
+  (ReviewListening AND cidr_contains(ip=ReviewLocalIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewLocalIP,ranges=["127.0.0.0/8","::1/128"])) AS NonLoopbackListener,
+  (ReviewEstablished AND ReviewAdministrativeTool
+    AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["127.0.0.0/8","::1/128","0.0.0.0/8","::/128"])) AS AdministrativeConnection,
+  (ReviewEstablished AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","224.0.0.0/4","240.0.0.0/4","::/128","::1/128","fe80::/10","ff00::/8"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=ReviewInternalCIDRs)) AS PeerOutsideConfiguredNetworks
+FROM ReviewNetworkFields
+LET NetworkReviewLeads <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "review_socket_role" AS SignalId,"Listener or established peer for role and administration review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=AdministrativeConnection OR PeerOutsideConfiguredNetworks,then=2,else=1) AS ReviewPriority,
+  dict(Pid=Pid,Name=ProcName,Username=ProcUsername) AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,CallChain=CallChain,
+    NonLoopbackListener=NonLoopbackListener,AdministrativeConnection=AdministrativeConnection,
+    PeerOutsideConfiguredNetworks=PeerOutsideConfiguredNetworks) AS Evidence4,
+  format(format="%v|review_socket|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,Pid,Laddr,Lport,Raddr,Rport,ConnStatus,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this process need this listening address or peer for its approved service or administrative task?" AS Hypothesis,
+  "Identify service and destination owners; confirm intended exposure and peer; correlate with the process and approved task" AS SuggestedChecks,
+  "Established sockets do not establish initiation direction. Wildcard listening does not prove Internet reachability; configured CIDRs are not a reputation check" AS ObservationLimit,
+  "LTH - 05 / LTH - 04" AS RecommendedNotebook
+FROM ReviewNetworkSignals
+WHERE NonLoopbackListener OR AdministrativeConnection OR PeerOutsideConfiguredNetworks
+
+LET ReviewServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(ssh|sshd|xrdp|xrdp-sesman|vncserver|tigervnc|telnet|rsh)([-.@][^ ]*)?\.service$''' AS RemoteAccessService,
+  ServiceUnit =~ '''(?i)^(docker|containerd|crio|cri-o|podman|kubelet)([-.@][^ ]*)?\.service$''' AS ContainerService,
+  ServiceUnit =~ '''(?i)^(nginx|apache2|httpd|mysql|mysqld|mariadb|postgresql|postgres|redis|redis-server|mongod|mongodb|elasticsearch)([-.@][^ ]*)?\.service$''' AS ApplicationDataService,
+  ServiceUnit =~ '''(?i)^(nfs|nfs-server|rpcbind|smb|smbd|nmb|nmbd|vsftpd|proftpd|pure-ftpd)([-.@][^ ]*)?\.service$''' AS FileSharingService
+FROM ServiceFields
+LET ActiveServiceLeads <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "review_active_service_role" AS SignalId,"Active access, application, container or file-sharing service" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(RemoteAccessService=RemoteAccessService,ContainerService=ContainerService,
+    ApplicationDataService=ApplicationDataService,FileSharingService=FileSharingService) AS Evidence4,
+  format(format="%v|review_service|%v|%v|%v",args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this active service required for the host role and is its access or data exposure intended?" AS Hypothesis,
+  "Confirm the service owner and purpose; inspect related listeners; collect unit configuration only for the selected hypothesis" AS SuggestedChecks,
+  "Observed loaded service state and naming only; no ExecStart, enablement, installed-package ownership or exposure proof" AS ObservationLimit,
+  "LTH - 04 / LTH - 05 / LTH - 12" AS RecommendedNotebook
+FROM ReviewServiceSignals
+WHERE ServiceLoad="loaded" AND ServiceActive="active"
+  AND (RemoteAccessService OR ContainerService OR ApplicationDataService OR FileSharingService)
+
+LET ReviewPlatforms <= SELECT ClientId,
+  (TextOrEmpty(X=get(item=scope(),field="Platform")) || "Unknown") AS ReviewCohort
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET ReviewPlatformIndex <= memoize(query={SELECT * FROM ReviewPlatforms},key="ClientId")
+
+-- Denominator is distinct clients that returned usable rows for this source,
+-- not all 16 scoped clients when some source results are missing.
+LET ReviewSourceClients <= SELECT * FROM chain(
+  processes={SELECT ClientId,"Process executable" AS Family FROM ProcessFields WHERE ProcExe!="" GROUP BY ClientId},
+  services={SELECT ClientId,"Service unit" AS Family FROM ServiceFields WHERE ServiceUnit!="" GROUP BY ClientId},
+  users={SELECT ClientId,"Shell account" AS Family FROM UserFields WHERE UserName!="" GROUP BY ClientId},
+  cron={SELECT ClientId,"Cron command" AS Family FROM CronResults GROUP BY ClientId}
+)
+LET ReviewSourceCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewSourceClients
+LET ReviewCoverage <= SELECT Family,ReviewCohort,count() AS CoveredHosts,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewSourceCohorts GROUP BY CohortKey
+LET ReviewCoverageIndex <= memoize(query={SELECT * FROM ReviewCoverage},key="CohortKey")
+
+LET ReviewObservations <= SELECT * FROM chain(
+  processes={SELECT ClientId,Fqdn,"Processes" AS Category,"Process executable" AS Family,
+    regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS Entity,
+    "LTH.SystemBaseline/Processes" AS ObservationSource FROM ProcessFields WHERE ProcExe!=""},
+  services={SELECT ClientId,Fqdn,"Services and Persistence" AS Category,"Service unit" AS Family,
+    ServiceUnit AS Entity,"LTH.SystemBaseline/Services" AS ObservationSource FROM ServiceFields WHERE ServiceUnit!=""},
+  users={SELECT ClientId,Fqdn,"Users and Privileges" AS Category,"Shell account" AS Family,
+    UserName+"|"+UserShell AS Entity,"LTH.SystemBaseline/Users" AS ObservationSource
+    FROM UserFields WHERE UserUid!="0" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$'''},
+  cron={SELECT ClientId,Fqdn,"Persistence" AS Category,"Cron command" AS Family,
+    CronUser+"|"+CronCommand AS Entity,"LTH.SystemBaseline/Crontab" AS ObservationSource FROM CronResults}
+)
+LET ReviewObservedCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewObservations
+LET ReviewUniqueHostEntities <= SELECT *,
+  format(format="%v|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS HostEntityKey,
+  format(format="%v|%v|%v",args=[ReviewCohort,Family,Entity]) AS PrevalenceKey,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewObservedCohorts GROUP BY HostEntityKey
+LET ReviewPrevalence <= SELECT PrevalenceKey,count() AS HostsWithEntity
+FROM ReviewUniqueHostEntities GROUP BY PrevalenceKey
+LET ReviewPrevalenceIndex <= memoize(query={SELECT * FROM ReviewPrevalence},key="PrevalenceKey")
+LET ReviewPrevalenceRows <= SELECT *,
+  get(item=ReviewCoverageIndex,field=CohortKey).CoveredHosts AS CoveredHosts,
+  get(item=ReviewPrevalenceIndex,field=PrevalenceKey).HostsWithEntity AS HostsWithEntity
+FROM ReviewUniqueHostEntities
+LET RareBaselineLeads <= SELECT ClientId,Fqdn,Category,
+  "review_low_prevalence" AS SignalId,"Low-prevalence baseline entity in the observed platform cohort" AS Indicator,
+  0 AS FindingWeight,2 AS ReviewPriority,Family AS Evidence1,Entity AS Evidence2,
+  dict(PlatformCohort=ReviewCohort,HostsWithEntity=HostsWithEntity,CoveredHosts=CoveredHosts) AS Evidence3,
+  "Compare approved roles before treating rarity as an anomaly; do not interpret as newly created" AS Evidence4,
+  format(format="%v|review_prevalence|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS EvidenceKey,
+  ObservationSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this uncommon executable, unit, account or scheduled command explained by this host's approved role?" AS Hypothesis,
+  "Compare with hosts having the same business role; identify owner and deployment purpose; inspect related baseline evidence" AS SuggestedChecks,
+  "One-Hunt prevalence among clients with source rows. Platform is not a business-role cohort; exact cron commands may contain host-specific values" AS ObservationLimit,
+  "LTH - 01 / the notebook for the observed family" AS RecommendedNotebook
+FROM ReviewPrevalenceRows
+WHERE ReviewCohort!="Unknown" AND CoveredHosts>=ReviewMinCohortHosts
+  AND HostsWithEntity<=ReviewMaxRareHosts
+  AND (HostsWithEntity * 100)<= (CoveredHosts * ReviewMaxRarePercent)
+
+LET AdditionalReviewCandidates <= SELECT * FROM chain(
+  admin=AdministrativeProcessLeads,account_cron=AccountScheduledLeads,
+  network=NetworkReviewLeads,services=ActiveServiceLeads,prevalence=RareBaselineLeads
+)
+LET EnhancedEvidenceCandidates <= SELECT * FROM chain(existing=AllEvidence,review=AdditionalReviewCandidates)
+LET EnhancedEvidence <= SELECT *,
+  if(condition=FindingWeight>0,then="Risk Indicator",else="Hunt Lead") AS EvidenceKind,
+  "Unreviewed" AS ReviewState,
+  if(condition=FindingWeight>=4,then=3,else=if(condition=FindingWeight>0,then=2,
+    else=(get(item=scope(),field="ReviewPriority") || 1))) AS ReviewPriority,
+  (get(item=scope(),field="SuggestedChecks") || Hypothesis) AS SuggestedChecks
+FROM EnhancedEvidenceCandidates GROUP BY EvidenceKey
+
+LET HuntLeadSummary <= SELECT ClientId,count() AS HuntLeadCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority
+FROM EnhancedEvidence GROUP BY ClientId
+LET HuntLeadIndex <= memoize(query={SELECT * FROM HuntLeadSummary},key="ClientId")
+LET FirstHuntLead(C) = SELECT Hypothesis FROM EnhancedEvidence WHERE ClientId=C ORDER BY ReviewPriority DESC LIMIT 1
+
+LET EvidenceAreas <= SELECT ClientId,Fqdn,Category,
+  max(item=FindingWeight) AS Weight,
+  sum(item=if(condition=FindingWeight>0,then=1,else=0)) AS EvidenceCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM EnhancedEvidence GROUP BY AreaKey
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,
+  if(condition=Weight>0,then="Risk indicators and available review leads",else="Review leads available; no scored indicator in this area") AS Indicator,
+  if(condition=Weight=5,then="Critical",else=if(condition=Weight=4,then="High",
+    else=if(condition=Weight=3,then="Medium",else=if(condition=Weight>0,then="Low",else="Review")))) AS Severity,
+  Weight AS ScoreContribution,EvidenceCount AS FindingCount,ReviewLeadCount,HighestReviewPriority
+FROM EvidenceAreas ORDER BY Fqdn
+
 ```
 
-## Cell 10 — Investigation Pivot Guide
+## Cell 30 (markdown)
+
+# Triage Findings Detail
+
+Displays the raw evidence behind each investigation candidate. Analysts must validate the process, command, account, service, network endpoint, or Cron entry before classifying the result as malicious or benign.
+
+## Cell 31 (vql)
+
+```vql
+LET HuntId <= "HUNT_ID"
+
+LET TextOrEmpty(X) = if(condition=X=NULL,then="",else=str(str=X))
+-- Keep this FALSE on the production server, consistently in all cells.
+LET EnableLabIndicators <= FALSE
+
+
+LET Fleet <= SELECT ClientId,Fqdn,"Coverage" AS Category,"Basic information source returned rows" AS Indicator,
+  0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET UserFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(),field="Description")) AS UserDescription,
+       TextOrEmpty(X=get(item=scope(), member="Uid")) AS UserUid,
+       TextOrEmpty(X=get(item=scope(), field="Gid")) AS UserGid,
+       TextOrEmpty(X=get(item=scope(), field="Shell")) AS UserShell,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="User")
+         ||
+         get(item=scope(), member="Username")
+       )) AS UserName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Homedir")
+         ||
+         get(item=scope(), member="HomeDir")
+         ||
+         get(item=scope(), member="Home")
+       )) AS HomeDir
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Users"
+)
+
+
+LET UserMatches <=
+SELECT *,
+       format(
+         format="%v|uid0|%v|%v",
+         args=[ClientId, UserName, HomeDir]
+       ) AS EvidenceKey,
+       5 AS FindingWeight
+FROM UserFields
+WHERE UserUid = "0"
+  AND NOT UserName =~ '''^root$'''
+  AND NOT (
+    UserName = ""
+    AND HomeDir = "/root"
+  )
+
+LET ProcessFields <=
+SELECT ClientId,
+       Fqdn,
+       get(item=scope(),field="Hash") AS ProcHash,
+       TextOrEmpty(X=(get(item=scope(), field="FlowId") || get(item=scope(), field="_FlowId"))) AS RowFlowId,
+       get(item=scope(), field="Deleted") AS ProcDeleted,
+       get(item=scope(), field="CreatedTime") AS ProcCreatedTime,
+       TextOrEmpty(X=get(item=scope(), field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Pid")
+         ||
+         get(item=scope(), member="PID")
+       )) AS ProcPid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Ppid")
+         ||
+         get(item=scope(), member="PPid")
+         ||
+         get(item=scope(), member="PPID")
+       )) AS ProcPpid,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Name")
+         ||
+         get(item=scope(), member="ProcessName")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=scope(), member="Exe")
+         ||
+         get(item=scope(), member="Executable")
+         ||
+         get(item=scope(), member="Path")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=scope(), member="CommandLine")
+         ||
+         get(item=scope(), member="Cmdline")
+         ||
+         get(item=scope(), member="cmdline")
+         ||
+         get(item=scope(), member="Command")
+       )) AS ProcCommandLine
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Processes"
+)
+
+
+LET ProcessSignals <=
+SELECT *,
+       ProcCommandLine =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       ProcCommandLine =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       ProcCommandLine =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       ProcExe =~
+         '''(?i)^/(tmp|var/tmp|dev/shm)/'''
+         AS WritablePathExe,
+
+       (
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+         OR
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS WritablePathExecution,
+
+       (
+         ProcName =~ '''(?i)^(nc|ncat)$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)(nc|ncat)(\s|$)'''
+       ) AS NetcatTool,
+
+       (
+         ProcName =~ '''(?i)^socat$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)socat(\s|$)'''
+       ) AS SocatTool,
+
+       ProcCommandLine =~
+         '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
+         AS PythonHTTPServer,
+       ProcExe =~ '''(?i)^/run/user/[0-9]+/''' AS UserRuntimeExecution,
+       (ProcName =~ '''(?i)^(xmrig|minerd|kinsing|kdevtmpfsi)$'''
+        OR ProcCommandLine =~ '''(?i)(xmrig|stratum\+tcp)''') AS MiningPattern
+FROM ProcessFields
+
+
+LET ProcessMatches <=
+SELECT *,
+       format(
+         format="%v|process|%v|%v|%v",
+         args=[ClientId, ProcPid, ProcExe, ProcCommandLine]
+       ) AS EvidenceKey,
+
+       if(
+         condition=DownloadPipeShell
+                   OR DecodePipeShell
+                   OR NetcatExec
+                   OR SocatExec
+                   OR DevTcpShell,
+         then=5,
+         else=if(
+           condition=WritablePathExe
+                     OR WritablePathExecution
+                     OR MiningPattern
+                     OR (UserRuntimeExecution AND PythonHTTPServer),
+           then=4,
+           else=if(
+             condition=NetcatTool
+                       OR SocatTool
+                       OR UserRuntimeExecution,
+             then=3,
+             else=2
+           )
+         )
+       ) AS FindingWeight
+FROM ProcessSignals
+WHERE DownloadPipeShell
+   OR DecodePipeShell
+   OR NetcatExec
+   OR SocatExec
+   OR DevTcpShell
+   OR WritablePathExe
+   OR WritablePathExecution
+   OR NetcatTool
+   OR SocatTool
+   OR PythonHTTPServer
+   OR UserRuntimeExecution
+   OR MiningPattern
+
+
+LET ServiceFields <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=Unit) AS ServiceUnit,TextOrEmpty(X=Description) AS ServiceDescription,
+  TextOrEmpty(X=Load) AS ServiceLoad,TextOrEmpty(X=Active) AS ServiceActive,TextOrEmpty(X=Sub) AS ServiceSub
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Services")
+
+LET ServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(kinsing|xmrig|kdevtmpfsi|watchbog)([-_.@][a-z0-9_.@-]+)?\.service$''' AS ThreatAssociatedName,
+  ServiceDescription =~ '''(?i)(cryptocurrency[ -](miner|mining)|reverse[ -]shell|backdoor[ -]service|unauthorized[ -]remote[ -]access)''' AS HighRiskDescription,
+  (EnableLabIndicators AND
+   (ServiceUnit =~ '''(?i)^(system-update-lab|backup-sync-lab|remote-support-lab)\.service$'''
+    OR ServiceDescription =~ '''(?i)(lab persistence|temporary update service|remote support lab)''')) AS KnownLabService
+FROM ServiceFields
+
+LET ServiceMatches <= SELECT *,
+  format(format="%v|service|%v|%v|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceDescription,ServiceLoad,ServiceActive,ServiceSub]) AS EvidenceKey,
+  if(condition=ThreatAssociatedName,then=5,else=4) AS FindingWeight
+FROM ServiceSignals
+WHERE ThreatAssociatedName OR HighRiskDescription OR KnownLabService
+
+LET NetworkFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(),field="CallChain")) AS RawCallChain,
+       TextOrEmpty(X=get(item=scope(), member="Laddr")) AS Laddr,
+       TextOrEmpty(X=get(item=scope(), member="Lport")) AS Lport,
+       TextOrEmpty(X=get(item=scope(), member="Raddr")) AS Raddr,
+       TextOrEmpty(X=get(item=scope(), member="Rport")) AS Rport,
+       TextOrEmpty(X=get(item=scope(), member="Pid")) AS Pid,
+       TextOrEmpty(X=get(item=scope(), member="Status")) AS ConnStatus,
+       get(item=scope(), member="ProcInfo") AS ProcInfo
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/NetworkConnections"
+)
+
+
+LET NetworkResults <=
+SELECT ClientId,
+       Fqdn,
+       Laddr,
+       Lport,
+       Raddr,
+       Rport,
+       Pid,
+       ConnStatus,
+       RawCallChain AS CallChain,
+       TextOrEmpty(X=get(item=ProcInfo,field="Username")) AS ProcUsername,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Name")
+         ||
+         get(item=ProcInfo, member="name")
+       )) AS ProcName,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="Exe")
+         ||
+         get(item=ProcInfo, member="exe")
+       )) AS ProcExe,
+       TextOrEmpty(X=(
+         get(item=ProcInfo, member="CommandLine")
+         ||
+         get(item=ProcInfo, member="cmdline")
+       )) AS ProcCommandLine
+FROM NetworkFields
+
+
+LET NetworkSignals <=
+SELECT *,
+       ConnStatus =~ '''(?i)^(LISTEN|LISTENING)$'''
+         AS IsListening,
+
+       ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$'''
+         AS IsEstablished,
+
+       Laddr =~ '''^(127\.|::1$|\[::1\]$)'''
+         AS LoopbackBind,
+
+       Lport =~ '''^(4444|5555)$'''
+         AS HighRiskPort,
+
+       ProcExe =~ '''(?i)^/(tmp|var/tmp|dev/shm)/'''
+         AS WritablePathExe,
+
+       (
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+         OR
+         ProcCommandLine =~
+           '''(?i)^\s*(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS WritablePathExecution,
+
+       (
+         ProcName =~ '''(?i)^(nc|ncat)$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)(nc|ncat)(\s|$)'''
+       ) AS NetcatTool,
+
+       (
+         ProcName =~ '''(?i)^socat$'''
+         OR
+         ProcCommandLine =~
+           '''(?i)(^|\s|/)socat(\s|$)'''
+       ) AS SocatTool,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       ProcCommandLine =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       ProcCommandLine =~
+         '''(?i)python[0-9.]*\s+-m\s+(http\.server|SimpleHTTPServer)(\s|$)'''
+         AS PythonHTTPServer
+FROM NetworkResults
+
+
+LET ClassifiedNetwork <=
+SELECT *,
+       NetcatExec
+       OR SocatExec
+         AS CommandExecutionSocket,
+
+       (
+         (IsListening OR IsEstablished)
+         AND
+         (WritablePathExe OR WritablePathExecution)
+       ) AS WritablePathSocket,
+
+       (
+         IsListening
+         AND
+         (NetcatTool OR SocatTool)
+       ) AS NetworkToolListener,
+
+       (
+         IsEstablished
+         AND
+         (NetcatTool OR SocatTool)
+       ) AS NetworkToolConnection,
+
+       (
+         IsListening
+         AND
+         PythonHTTPServer
+       ) AS PythonListener,
+
+       (
+         IsListening
+         AND
+         HighRiskPort
+         AND
+         NOT LoopbackBind
+       ) AS RiskyPortListener
+FROM NetworkSignals
+
+
+LET NetworkMatches <=
+SELECT *,
+       format(
+         format="%v|network|%v|%v|%v|%v|%v|%v",
+         args=[
+           ClientId,
+           Pid,
+           Laddr,
+           Lport,
+           Raddr,
+           Rport,
+           ConnStatus
+         ]
+       ) AS EvidenceKey,
+
+       if(
+         condition=CommandExecutionSocket,
+         then=5,
+         else=if(
+           condition=WritablePathSocket
+                     OR (
+                       PythonListener
+                       AND RiskyPortListener
+                     ),
+           then=4,
+           else=if(
+             condition=NetworkToolListener
+                       OR NetworkToolConnection,
+             then=3,
+             else=2
+           )
+         )
+       ) AS FindingWeight
+FROM ClassifiedNetwork
+WHERE CommandExecutionSocket
+   OR WritablePathSocket
+   OR NetworkToolListener
+   OR NetworkToolConnection
+   OR PythonListener
+   OR RiskyPortListener
+
+LET CronFields <=
+SELECT ClientId,
+       Fqdn,
+       TextOrEmpty(X=get(item=scope(), member="User")) AS CronUser,
+       TextOrEmpty(X=get(item=scope(), member="Event")) AS CronEvent,
+       TextOrEmpty(X=get(item=scope(), member="Minute")) AS Minute,
+       TextOrEmpty(X=get(item=scope(), member="Hour")) AS Hour,
+       TextOrEmpty(X=get(item=scope(), member="DayOfMonth")) AS DayOfMonth,
+       TextOrEmpty(X=get(item=scope(), member="Month")) AS Month,
+       TextOrEmpty(X=get(item=scope(), member="DayOfWeek")) AS DayOfWeek,
+       TextOrEmpty(X=get(item=scope(), member="Path")) AS CronPath,
+       TextOrEmpty(X=get(item=scope(), field="Command")) AS CommandValue,
+       TextOrEmpty(X=get(item=scope(), field="RawLine")) AS CronRawLine,
+       TextOrEmpty(X=get(item=scope(), field="ParseStatus")) AS CronParseStatus,
+       get(item=scope(), field="ParserVersion") AS CronParserVersion,
+       TextOrEmpty(X=get(item=scope(), field="Content")) AS CronContent,
+       get(item=scope(), field="PotentiallyTruncated") AS CronPotentiallyTruncated
+FROM hunt_results(
+  hunt_id=HuntId,
+  artifact="LTH.SystemBaseline/Crontab"
+)
+
+
+LET CronResults <=
+SELECT ClientId,
+       Fqdn,
+       CronUser,
+       CronEvent,
+       Minute,
+       Hour,
+       DayOfMonth,
+       Month,
+       DayOfWeek,
+       CronPath,
+       CronRawLine,CronParseStatus,CronParserVersion,
+       CommandValue AS CronCommand
+FROM CronFields
+WHERE CommandValue != "" AND CronParseStatus != "Unparsed"
+
+
+LET CronSignals <=
+SELECT *,
+       CronCommand =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       CronCommand =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       CronCommand =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
+
+       CronCommand =~
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
+         AS ScheduledRemoteFetch,
+
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
+       (
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM CronResults
+
+
+LET ClassifiedCron <=
+SELECT *,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
+         )
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
+         )
+       ) AS RepeatedRemoteFetch
+FROM CronSignals
+
+
+LET ScoredCron <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedCron
+
+
+LET CronMatches <=
+SELECT *,
+       format(
+         format="%v|cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+         args=[
+           ClientId,
+           CronPath,
+           CronUser,
+           CronEvent,
+           Minute,
+           Hour,
+           DayOfMonth,
+           Month,
+           DayOfWeek,
+           CronCommand
+         ]
+       ) AS EvidenceKey,
+
+       if(
+         condition=CriticalCommand,
+         then=5,
+         else=if(
+           condition=WritablePathExecution
+                     OR RepeatedRemoteFetch,
+           then=4,
+           else=if(
+             condition=InlineInterpreter,
+             then=3,
+             else=2
+           )
+         )
+       ) AS FindingWeight
+FROM ScoredCron
+WHERE CriticalCommand
+   OR WritablePathExecution
+   OR RepeatedRemoteFetch
+   OR InlineInterpreter
+   OR ScheduledRemoteFetch
+
+
+LET UserDetail <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_additional_uid0" AS SignalId,"Additional UID 0 account" AS Indicator,
+  FindingWeight,EvidenceKey,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,HomeDir AS Evidence3,UserShell AS Evidence4,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this additional UID 0 identity authorized for this server?" AS Hypothesis,
+  "Passwd configuration only; no proof of login or privilege use" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook,
+  UserName AS User,UserDescription AS Description,UserUid AS Uid,UserGid AS Gid,
+  HomeDir AS Homedir,UserShell AS Shell
+FROM UserMatches
+
+LET ProcessDetail <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_behavior" AS SignalId,
+  if(condition=DownloadPipeShell,then="Downloaded content piped to a shell",
+    else=if(condition=DecodePipeShell,then="Decoded content piped to a shell",
+      else=if(condition=NetcatExec OR SocatExec OR DevTcpShell,then="Command contains a shell/socket execution pattern",
+        else=if(condition=MiningPattern,then="Mining-related name or command pattern",
+          else=if(condition=WritablePathExe OR WritablePathExecution,then="Execution from a temporary path",
+            else=if(condition=UserRuntimeExecution,then="Execution from a user runtime path",
+              else=if(condition=NetcatTool OR SocatTool,then="Network utility in process command",
+                else="Python HTTP server command"))))))) AS Indicator,
+  FindingWeight,EvidenceKey,dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Name=ProcName,Hash=ProcHash,FlowId=RowFlowId,DownloadPipeShell=DownloadPipeShell,DecodePipeShell=DecodePipeShell,
+    NetcatExec=NetcatExec,SocatExec=SocatExec,DevTcpShell=DevTcpShell,MiningPattern=MiningPattern,
+    WritablePathExe=WritablePathExe,WritablePathExecution=WritablePathExecution,
+    UserRuntimeExecution=UserRuntimeExecution,NetcatTool=NetcatTool,SocatTool=SocatTool,
+    PythonHTTPServer=PythonHTTPServer) AS Evidence4,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate executable origin, server role and whether this command was authorized" AS Hypothesis,
+  "Command/name regex on a process snapshot; not a shell parser or confirmation of compromise" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook,
+  ProcPid AS Pid,ProcPpid AS Ppid,ProcName AS Name,ProcExe AS Exe,ProcCommandLine AS CommandLine,
+  ProcUsername AS Username,ProcHash AS Hash
+FROM ProcessMatches
+
+LET ServiceDetail <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_service_name_description" AS SignalId,
+  if(condition=ThreatAssociatedName,then="Service name matches a threat-associated watchlist",
+    else=if(condition=HighRiskDescription,then="Service description matches suspicious terminology",
+      else="Explicitly enabled lab service indicator")) AS Indicator,
+  FindingWeight,EvidenceKey,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(ThreatAssociatedName=ThreatAssociatedName,HighRiskDescription=HighRiskDescription,KnownLabService=KnownLabService) AS Evidence4,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this service name/description correspond to an unauthorized installed service?" AS Hypothesis,
+  "Only name, description and state are available. Priority weight is not confidence; collect the unit and executable to validate" AS ObservationLimit,
+  "LTH - 04 / LTH - 06" AS RecommendedNotebook,
+  ServiceUnit AS Unit,ServiceDescription AS Description,ServiceLoad AS Load,
+  ServiceActive AS Active,ServiceSub AS Sub
+FROM ServiceMatches
+
+LET NetworkDetail <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "baseline_process_socket" AS SignalId,
+  if(condition=CommandExecutionSocket,then="Socket-owning process has a command execution pattern",
+    else=if(condition=WritablePathSocket,then="Active socket with temporary-path execution context",
+      else=if(condition=NetworkToolListener OR NetworkToolConnection,then="Network utility listener or connection",
+        else=if(condition=PythonListener,then="Python HTTP listener",else="Non-loopback listener on a configured review port")))) AS Indicator,
+  FindingWeight,EvidenceKey,Pid AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,
+    Username=ProcUsername,CallChain=CallChain,
+    CommandExecutionSocket=CommandExecutionSocket,WritablePathSocket=WritablePathSocket,
+    NetworkToolListener=NetworkToolListener,NetworkToolConnection=NetworkToolConnection,
+    PythonListener=PythonListener,RiskyPortListener=RiskyPortListener) AS Evidence4,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this socket, associated command and peer expected for this host role?" AS Hypothesis,
+  "Socket snapshot; a port number does not identify a protocol or prove command-and-control" AS ObservationLimit,
+  "LTH - 05 - Network Connections Dashboard" AS RecommendedNotebook,
+  Laddr,Lport,Raddr,Rport,Pid,ConnStatus AS Status,ProcName,ProcExe,ProcCommandLine,ProcUsername,CallChain
+FROM NetworkMatches
+
+LET CronDetail <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_command" AS SignalId,
+  if(condition=CriticalCommand,then="Cron declares a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron declares execution from a temporary path",
+      else=if(condition=RepeatedRemoteFetch,then="Cron declares remote fetch at reboot or every minute",
+        else=if(condition=InlineInterpreter,then="Cron declares inline interpreter code",else="Cron declares remote fetch")))) AS Indicator,
+  FindingWeight,EvidenceKey,CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParseStatus=CronParseStatus,ParserVersion=CronParserVersion,
+    CriticalCommand=CriticalCommand,WritablePathExecution=WritablePathExecution,
+    RepeatedRemoteFetch=RepeatedRemoteFetch,InlineInterpreter=InlineInterpreter,ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this scheduled command authorized and is there separate evidence it executed?" AS Hypothesis,
+  "Declared command only; legacy parser rows may be incomplete. No cron runtime or complete shell semantics" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook,
+  CronUser,CronPath,CronCommand,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek
+FROM CronMatches
+
+LET AccountSignals <= SELECT *,
+  UserShell =~ '''^/(tmp|var/tmp|dev/shm)/''' AS TemporaryShell,
+  (UserName="root" AND HomeDir =~ '''^/(tmp|var/tmp|dev/shm)/''') AS TemporaryRootHome,
+  (UserGid="0" AND UserUid!="0" AND UserUid!="") AS PrimaryRootGroup,
+  (UserName =~ '''^(www-data|apache|nginx|mysql|mariadb|postgres|redis|memcached|nobody)$'''
+   AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS ServiceInteractiveShell
+FROM UserFields
+
+LET AccountMatches <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "baseline_account_configuration" AS SignalId,
+  if(condition=TemporaryShell,then="Account declares a shell under a temporary directory",
+    else=if(condition=TemporaryRootHome,then="Root account declares a temporary home directory",
+      else=if(condition=PrimaryRootGroup,then="Non-root UID has primary GID 0",
+        else="Named service account has an interactive shell"))) AS Indicator,
+  if(condition=TemporaryShell,then=4,else=if(condition=TemporaryRootHome,then=3,else=2)) AS FindingWeight,
+  UserName AS Evidence1,dict(Uid=UserUid,Gid=UserGid) AS Evidence2,
+  UserShell AS Evidence3,dict(Home=HomeDir,TemporaryShell=TemporaryShell,
+    TemporaryRootHome=TemporaryRootHome,PrimaryRootGroup=PrimaryRootGroup,
+    ServiceInteractiveShell=ServiceInteractiveShell) AS Evidence4,
+  format(format="%v|account_config|%v|%v|%v|%v|%v",
+    args=[ClientId,UserName,UserUid,UserGid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate account role and whether this shell, group or home was authorized" AS Hypothesis,
+  "Configuration snapshot; does not establish a login or privilege use" AS ObservationLimit,
+  "LTH - 02 - Users Groups and Privileges Dashboard" AS RecommendedNotebook
+FROM AccountSignals
+WHERE TemporaryShell OR TemporaryRootHome OR PrimaryRootGroup OR ServiceInteractiveShell
+
+LET ProcessExtraFields <= SELECT *,
+  format(format="%v|%v|%v",args=[ClientId,RowFlowId,ProcPid]) AS ProcessLookupKey,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS CleanExe,
+  (ProcDeleted=TRUE OR ProcExe =~ '''\(deleted\)$''') AS IsDeleted,
+  ProcExe =~ '''^/?memfd:''' AS IsMemfd
+FROM ProcessFields
+
+LET ProcessIndex <= memoize(query={SELECT * FROM ProcessExtraFields},key="ProcessLookupKey")
+LET ProcessWithParent <= SELECT *,
+  get(item=ProcessIndex,field=format(format="%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPpid])) AS ParentProcess
+FROM ProcessExtraFields
+
+LET NewProcessSignals <= SELECT *,
+  (ParentProcess.ProcName =~ '''^(nginx|apache2|httpd|php-fpm[0-9.]*|uwsgi|gunicorn[0-9.: -]*)$'''
+   AND CleanExe =~ '''/(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|ruby|php[0-9.]*)$'''
+   AND ProcPpid!="0" AND ProcPpid!="") AS WebServiceChild,
+  (CleanExe =~ '''/ssh$'''
+   AND ProcCommandLine =~ '''(^|\s)(-(R|D)(\s|[0-9*\[:/])|-o\s*(RemoteForward|DynamicForward)\s*=)''') AS SSHForwarding
+FROM ProcessWithParent
+
+LET ExtraProcessMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_process_context" AS SignalId,
+  if(condition=IsMemfd,then="Process executable is backed by memfd",
+    else=if(condition=WebServiceChild,then="Shell or interpreter has a web-service parent in this snapshot",
+      else=if(condition=SSHForwarding,then="SSH process declares remote or dynamic forwarding",
+        else="Process executable is marked deleted"))) AS Indicator,
+  if(condition=IsMemfd,then=4,else=if(condition=WebServiceChild,then=3,else=2)) AS FindingWeight,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Username=ProcUsername,CreatedTime=ProcCreatedTime) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Deleted=IsDeleted,Memfd=IsMemfd,SSHForwarding=SSHForwarding,
+    WebServiceChild=WebServiceChild,ParentName=ParentProcess.ProcName,
+    ParentExe=ParentProcess.ProcExe,ParentCommandLine=ParentProcess.ProcCommandLine,
+    FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|process_context|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the executable, parent application behavior and authorized forwarding or updates" AS Hypothesis,
+  "Snapshot correlation; not historical process-creation evidence. Deleted binaries can follow normal updates" AS ObservationLimit,
+  "LTH - 04 - Processes and Services Dashboard" AS RecommendedNotebook
+FROM NewProcessSignals
+WHERE IsMemfd OR WebServiceChild OR SSHForwarding OR IsDeleted
+
+LET CronScriptFiles <= SELECT ClientId,Fqdn,
+  TextOrEmpty(X=get(item=scope(),field="OSPath")) AS ScriptPath,
+  TextOrEmpty(X=get(item=scope(),field="Content")) AS ScriptContent,
+  get(item=scope(),field="Mtime") AS ScriptMtime,
+  get(item=scope(),field="FileSize") AS ScriptFileSize,
+  get(item=scope(),field="ContentLimit") AS ScriptContentLimit,
+  get(item=scope(),field="PotentiallyTruncated") AS ScriptPotentiallyTruncated
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Crontab")
+WHERE ScriptPath!="" AND ScriptContent!=""
+
+LET ScriptResults <= SELECT * FROM foreach(row=CronScriptFiles,query={
+  SELECT ClientId,Fqdn,ScriptPath,ScriptMtime,ScriptFileSize,ScriptContentLimit,ScriptPotentiallyTruncated,
+    _value AS CronCommand,(_key + 1) AS ScriptLineNumber,"" AS CronEvent,"" AS Minute,"" AS Hour
+  FROM items(item=split(string=ScriptContent,sep="\n"))
+})
+WHERE NOT CronCommand =~ '''^\s*(#|$)'''
+
+LET ScriptSignals <=
+SELECT *,
+       CronCommand =~
+         '''(?i)(/usr/bin/|/bin/)?(curl|wget)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DownloadPipeShell,
+
+       CronCommand =~
+         '''(?i)(base64\s+(-d|--decode)|openssl\s+enc\s+-d)[^|]{0,1000}[|]\s*(sudo\s+)?(/usr/bin/|/bin/)?(ba|da|z|k)?sh(\s|$)'''
+         AS DecodePipeShell,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)(nc|ncat)(\s|$).*(\s-e(\s|$)|\s-c(\s|$)|--exec(=|\s)|--sh-exec(=|\s))'''
+         AS NetcatExec,
+
+       CronCommand =~
+         '''(?i)(^|\s|/)socat(\s|$).*(EXEC|SYSTEM):'''
+         AS SocatExec,
+
+       CronCommand =~
+         '''(?i)/dev/(tcp|udp)/[A-Za-z0-9._:-]+'''
+         AS DevTcpShell,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(nohup\s+)?/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS DirectWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?((ba|da|z|k)?sh|python[0-9.]*|perl|php|ruby)\s+/(tmp|var/tmp|dev/shm)/[^\s;&|]+'''
+       ) AS InterpretedWritableExecution,
+
+       (
+         CronCommand =~
+           '''(?i)(^\s*|[;&|]\s*)(sudo\s+)?(/usr/bin/|/bin/)?(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)'''
+       ) AS InlineInterpreter,
+
+       CronCommand =~
+         '''(?i)(^|[;&|]\s*|\s)(/usr/bin/|/bin/)?(curl|wget)(\s|$)[^\r\n]{0,1000}(https?|ftp)://'''
+         AS ScheduledRemoteFetch,
+
+       CronEvent =~ '''(?i)^@reboot$'''
+         AS AtReboot,
+
+       (
+         Minute =~ '''^(\*|\*/1)$'''
+         AND
+         Hour = "*"
+       ) AS EveryMinute
+FROM ScriptResults
+
+
+LET ClassifiedScript <=
+SELECT *,
+       DirectWritableExecution
+       OR InterpretedWritableExecution
+         AS WritablePathExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           DirectWritableExecution
+           OR InterpretedWritableExecution
+         )
+       ) AS DownloadThenWritableExecution,
+
+       (
+         ScheduledRemoteFetch
+         AND
+         (
+           AtReboot
+           OR EveryMinute
+         )
+       ) AS RepeatedRemoteFetch
+FROM ScriptSignals
+
+
+LET ScoredScript <=
+SELECT *,
+       DownloadPipeShell
+       OR DecodePipeShell
+       OR NetcatExec
+       OR SocatExec
+       OR DevTcpShell
+       OR DownloadThenWritableExecution
+         AS CriticalCommand
+FROM ClassifiedScript
+
+
+
+LET CronScriptMatches <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "baseline_cron_script_content" AS SignalId,
+  if(condition=CriticalCommand,then="Cron script line contains a shell/socket or download-execution pattern",
+    else=if(condition=WritablePathExecution,then="Cron script line declares temporary-path execution",
+      else=if(condition=InlineInterpreter,then="Cron script line declares inline interpreter code",
+        else="Cron script line declares remote fetch"))) AS Indicator,
+  if(condition=CriticalCommand,then=5,else=if(condition=WritablePathExecution,then=4,
+    else=if(condition=InlineInterpreter,then=3,else=2))) AS FindingWeight,
+  ScriptPath AS Evidence1,ScriptLineNumber AS Evidence2,CronCommand AS Evidence3,
+  dict(Mtime=ScriptMtime,FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated,CriticalCommand=CriticalCommand,
+    WritablePathExecution=WritablePathExecution,InlineInterpreter=InlineInterpreter,
+    ScheduledRemoteFetch=ScheduledRemoteFetch) AS Evidence4,
+  format(format="%v|cron_script|%v|%v|%v",args=[ClientId,ScriptPath,ScriptLineNumber,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script invoked by cron/run-parts, and is the declared behavior authorized?" AS Hypothesis,
+  "Content prefix and line regex only; comments skipped, but strings/dead code may match. Existence does not prove execution" AS ObservationLimit,
+  "LTH - 06 - Persistence Mechanisms Dashboard" AS RecommendedNotebook
+FROM ScoredScript
+WHERE CriticalCommand OR WritablePathExecution OR InlineInterpreter OR ScheduledRemoteFetch
+
+LET MountFields <= SELECT ClientId,Fqdn,Device,Mount,FSType,Options,
+  TextOrEmpty(X=(get(item=scope(),field="FlowId") || get(item=scope(),field="_FlowId"))) AS MountFlowId,
+  regex_replace(source=TextOrEmpty(X=Mount),re="/+$",replace="") AS MountPrefix
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Mounts")
+
+-- Resolve the longest matching mount, including normal nested mounts.
+-- Encoded mount paths require decoding before they can be correlated safely.
+LET MountFor(C,F,E) = SELECT *,len(list=MountPrefix) AS PrefixLength
+FROM MountFields
+WHERE ClientId=C AND MountFlowId=F AND TextOrEmpty(X=Mount)!=""
+  AND NOT TextOrEmpty(X=Mount) =~ '''\\[0-7]{3}'''
+  AND (E=MountPrefix OR split(string=E,sep_string=MountPrefix+"/")[0]="")
+ORDER BY PrefixLength DESC LIMIT 1
+
+LET MountProcessPaths <= SELECT *,
+  regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS ExecutablePath
+FROM ProcessFields
+WHERE ProcExe =~ '''^/(mnt|media|home|srv|opt|run/user)/'''
+
+LET ExecutableMounts <= SELECT *,
+  MountFor(C=ClientId,F=RowFlowId,E=ExecutablePath)[0] AS BackingMount
+FROM MountProcessPaths
+WHERE NOT ExecutablePath =~ '''[\s\\]'''
+
+LET MountExecutionMatches <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "baseline_network_mount_execution" AS SignalId,
+  "Process executable path resolves to a network filesystem in this snapshot" AS Indicator,
+  2 AS FindingWeight,dict(Pid=ProcPid,Ppid=ProcPpid) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(Mount=BackingMount.Mount,Device=BackingMount.Device,FSType=BackingMount.FSType,
+    Options=BackingMount.Options,SupportingArtifact="LTH.SystemBaseline/Mounts",FlowId=RowFlowId) AS Evidence4,
+  format(format="%v|%v|mounted_exe|%v|%v|%v",
+    args=[ClientId,RowFlowId,ProcPid,ProcExe,BackingMount.Mount]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is executable code on this network share expected for this server role?" AS Hypothesis,
+  "Path-based, non-atomic snapshot correlation; process mount namespaces and mounts may differ" AS ObservationLimit,
+  "LTH - 01 / LTH - 04" AS RecommendedNotebook
+FROM ExecutableMounts
+WHERE BackingMount.FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountContext <= SELECT ClientId,Fqdn,"Mount Review" AS Category,
+  "baseline_network_mount_inventory" AS SignalId,
+  "Network filesystem available for hypothesis review" AS Indicator,
+  0 AS FindingWeight,Mount AS Evidence1,Device AS Evidence2,FSType AS Evidence3,
+  dict(Options=Options,FlowId=MountFlowId) AS Evidence4,
+  format(format="%v|%v|mount_context|%v|%v",args=[ClientId,MountFlowId,Mount,Device]) AS EvidenceKey,
+  "LTH.SystemBaseline/Mounts" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Validate the share owner, purpose and which applications use it" AS Hypothesis,
+  "Mount inventory alone has weight zero and does not establish malicious use" AS ObservationLimit,
+  "LTH - 01 - System Baseline Dashboard" AS RecommendedNotebook
+FROM MountFields WHERE FSType =~ '''^(nfs|nfs4|cifs|smb3|fuse\.sshfs)$'''
+
+LET MountReview <= SELECT * FROM chain(execution=MountExecutionMatches,context=MountContext)
+
+LET PackageRaw <= SELECT * FROM chain(
+  debian={SELECT *,"Debian" AS PackageFamily,"LTH.SystemBaseline/DebianPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/DebianPackages")},
+  rhel={SELECT *,"RHEL" AS PackageFamily,"LTH.SystemBaseline/RHELPackages" AS PackageSource
+    FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/RHELPackages")}
+)
+LET PackageFields <= SELECT ClientId,Fqdn,PackageFamily,PackageSource,
+  TextOrEmpty(X=(get(item=scope(),field="Package") || get(item=scope(),field="Name"))) AS PackageName,
+  TextOrEmpty(X=get(item=scope(),field="Version")) AS PackageVersion,
+  TextOrEmpty(X=(get(item=scope(),field="State") || get(item=scope(),field="Status"))) AS PackageState,
+  TextOrEmpty(X=get(item=scope(),field="Repository")) AS PackageRepository
+FROM PackageRaw
+LET InstalledPackages <= SELECT *,
+  regex_replace(source=PackageName,
+    re='''(\.(x86_64|i[3-6]86|noarch|aarch64|armv[0-9]+[a-z]*|ppc64le|s390x)|:[a-z0-9_-]+)$''',replace="") AS NormalizedPackage
+FROM PackageFields
+WHERE PackageName!="" AND (PackageFamily="RHEL" OR PackageState IN ("installed","active"))
+LET PackageContext <= SELECT ClientId,Fqdn,"Package Review" AS Category,
+  "baseline_dual_use_package_inventory" AS SignalId,
+  "Installed network, proxy or remote-access tooling for role review" AS Indicator,
+  0 AS FindingWeight,PackageName AS Evidence1,PackageVersion AS Evidence2,
+  dict(Family=PackageFamily,State=PackageState,Repository=PackageRepository) AS Evidence3,
+  "Installed software inventory does not establish execution, compromise, file ownership or vulnerability" AS Evidence4,
+  format(format="%v|package_context|%v|%v|%v",args=[ClientId,PackageSource,PackageName,PackageVersion]) AS EvidenceKey,
+  PackageSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this tool expected for the server role, and do process/network findings show relevant use?" AS Hypothesis,
+  "RHEL package names include architecture; removed Debian entries are excluded. No version-to-CVE inference" AS ObservationLimit,
+  "LTH - 01 / LTH - 04 / LTH - 05" AS RecommendedNotebook
+FROM InstalledPackages
+WHERE NormalizedPackage =~ '''^(nmap|nmap-ncat|ncat|netcat|netcat-openbsd|netcat-traditional|socat|masscan|proxychains|proxychains4|chisel|ngrok|frp|frpc|frps|rclone|openssh-clients|openssh-client)$'''
+
+LET SecurityServiceMatches <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "baseline_security_service_state" AS SignalId,
+  "A listed logging/audit service has an inactive or failed state" AS Indicator,
+  2 AS FindingWeight,ServiceUnit AS Evidence1,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence2,
+  ServiceDescription AS Evidence3,
+  "Review maintenance, configured logging architecture and service diagnostics" AS Evidence4,
+  format(format="%v|security_service_state|%v|%v|%v",
+    args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this observed service state expected, or has logging continuity been affected?" AS Hypothesis,
+  "Only an existing row is evaluated; absence does not mean disabled. State does not establish tampering" AS ObservationLimit,
+  "LTH - 04 / LTH - 08" AS RecommendedNotebook
+FROM ServiceFields
+WHERE ServiceLoad="loaded" AND ServiceUnit =~ '''^(auditd|rsyslog|systemd-journald)\.service$'''
+  AND (ServiceActive IN ("failed","inactive") OR ServiceSub="failed")
+LET SourceCoverage <=
+SELECT *
+FROM chain(
+  users={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Users source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM UserFields
+    GROUP BY ClientId
+  },
+  processes={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Processes source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM ProcessFields
+    GROUP BY ClientId
+  },
+  services={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Services source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM ServiceFields
+    GROUP BY ClientId
+  },
+  network={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Network source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM NetworkFields
+    GROUP BY ClientId
+  },
+  cron={
+    SELECT ClientId,
+           Fqdn,
+           "Coverage" AS Category,
+           "Cron source returned rows" AS Indicator,
+           0 AS Weight,
+           0 AS EvidenceCount,
+           1 AS SourceCollected
+    FROM CronFields
+    WHERE CommandValue!="" OR CronContent!=""
+    GROUP BY ClientId
+  }
+)
+
+
+-- ============================================================
+-- 8. Merge category-level findings
+LET InventoryPlatform <= SELECT ClientId,Fqdn,TextOrEmpty(X=get(item=scope(),field="Platform")) AS Platform
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET PlatformFamilies <= SELECT *,
+  if(condition=Platform =~ '''(?i)^(ubuntu|debian|linuxmint|kali|raspbian|pop)$''',then="Debian",
+    else=if(condition=Platform =~ '''(?i)^(alma|almalinux|rocky|rhel|redhat|red hat.*|centos|ol|oracle|oraclelinux|fedora)$''',then="RHEL",else="Unknown")) AS ExpectedPackageFamily
+FROM InventoryPlatform
+LET PlatformIndex <= memoize(query={SELECT * FROM PlatformFamilies},key="ClientId")
+LET ApplicablePackages <= SELECT *,get(item=PlatformIndex,field=ClientId).ExpectedPackageFamily AS ExpectedFamily
+FROM InstalledPackages
+WHERE PackageFamily=ExpectedFamily
+
+LET ExtraCoverage <= SELECT * FROM chain(
+  mounts={SELECT ClientId,Fqdn,"Coverage" AS Category,"Mounts source returned rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM MountFields GROUP BY ClientId},
+  packages={SELECT ClientId,Fqdn,"Coverage" AS Category,"Applicable package family returned installed rows" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,1 AS SourceCollected FROM ApplicablePackages GROUP BY ClientId}
+)
+
+LET SelectedScope <= SELECT ClientId,Fqdn FROM chain(
+  inventory=Fleet,users=UserFields,processes=ProcessFields,services=ServiceFields,
+  network=NetworkFields,cron=CronFields,mounts=MountFields,packages=PackageFields
+) GROUP BY ClientId
+
+LET CronQuality <= SELECT ClientId,
+  sum(item=if(condition=CommandValue!="" AND CronParserVersion!=2,then=1,else=0)) AS LegacyCronRows,
+  sum(item=if(condition=CronParseStatus="Unparsed",then=1,else=0)) AS UnparsedCronRows,
+  sum(item=if(condition=CronPotentiallyTruncated=TRUE,then=1,else=0)) AS TruncatedCronScripts
+FROM CronFields GROUP BY ClientId
+LET CronQualityIndex <= memoize(query={SELECT * FROM CronQuality},key="ClientId")
+
+LET AllEvidenceCandidates <= SELECT * FROM chain(
+  users=UserDetail,processes=ProcessDetail,services=ServiceDetail,network=NetworkDetail,cron=CronDetail,
+  accounts=AccountMatches,process_context=ExtraProcessMatches,cron_scripts=CronScriptMatches,
+  mounts=MountReview,packages=PackageContext,security_services=SecurityServiceMatches
+)
+LET AllEvidence <= SELECT * FROM AllEvidenceCandidates GROUP BY EvidenceKey
+LET PositiveEvidence <= SELECT * FROM AllEvidence WHERE FindingWeight>0
+
+-- Original five categories; cap each category at its highest matched weight.
+LET RiskAreas <= SELECT ClientId,Fqdn,Category,
+  "Highest matched weight in this existing area" AS Indicator,
+  max(item=FindingWeight) AS Weight,count() AS EvidenceCount,0 AS SourceCollected,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM PositiveEvidence GROUP BY AreaKey
+LET Findings <= SELECT * FROM chain(
+  all_clients={SELECT ClientId,Fqdn,"Coverage" AS Category,"Client has selected baseline data" AS Indicator,
+    0 AS Weight,0 AS EvidenceCount,0 AS SourceCollected FROM SelectedScope},
+  inventory=Fleet,source_coverage=SourceCoverage,added_coverage=ExtraCoverage,areas=RiskAreas
+)
+
+-- Edit to include your actual internal networks, including internally routed public ranges.
+-- A peer outside this list is not automatically Internet traffic or malicious.
+LET ReviewInternalCIDRs <= split(string="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7",sep=",")
+
+LET ReviewMinCohortHosts <= 4
+LET ReviewMaxRareHosts <= 2
+LET ReviewMaxRarePercent <= 25
+
+LET AdminProcessSignals <= SELECT *,
+  ProcName =~ '''(?i)^ssh$''' AS RemoteClient,
+  ProcName =~ '''(?i)^(scp|sftp|rsync|rclone)$''' AS TransferTool,
+  ProcName =~ '''(?i)^(curl|wget)$''' AS FetchTool,
+  ProcName =~ '''(?i)^(nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS NetworkUtility,
+  (ProcUsername="root" AND ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS RootShell,
+  ProcName =~ '''(?i)^(sudo|su|doas)$''' AS PrivilegeUtility,
+  ProcCommandLine =~ '''(?i)(^|\s|/)(python[0-9.]*\s+-c|perl\s+-e|php\s+-r|ruby\s+-e)(\s|$)''' AS InlineCode,
+  (ProcName =~ '''(?i)^(screen|tmux|nohup)$'''
+   OR ProcCommandLine =~ '''(?i)^\s*(sudo\s+)?nohup\s''') AS BackgroundSession,
+  ProcExe =~ '''^/(usr/local|opt|srv|home|root|mnt|media)/''' AS ApplicationPathExe,
+  (ProcName =~ '''(?i)^(sh|bash|dash|zsh|ksh|python[0-9.]*|perl|php[0-9.]*|ruby)$'''
+   AND ProcCommandLine =~ '''\s/(usr/local|opt|srv|home|root|mnt|media)/[^\s;&|]+''') AS InterpreterPathReference
+FROM ProcessFields
+
+LET AdministrativeProcessLeads <= SELECT ClientId,Fqdn,"Processes" AS Category,
+  "review_administrative_process" AS SignalId,
+  "Administrative, application-path or interpreter process to validate" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=RootShell OR PrivilegeUtility OR InlineCode OR TransferTool OR RemoteClient,then=2,else=1) AS ReviewPriority,
+  dict(Pid=ProcPid,Ppid=ProcPpid,Name=ProcName,Username=ProcUsername,FlowId=RowFlowId) AS Evidence1,
+  ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(RemoteClient=RemoteClient,TransferTool=TransferTool,FetchTool=FetchTool,NetworkUtility=NetworkUtility,
+    RootShell=RootShell,PrivilegeUtility=PrivilegeUtility,InlineCode=InlineCode,BackgroundSession=BackgroundSession,
+    ApplicationPathExe=ApplicationPathExe,InterpreterPathReference=InterpreterPathReference) AS Evidence4,
+  format(format="%v|%v|review_process|%v|%v|%v",args=[ClientId,RowFlowId,ProcPid,ProcExe,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/Processes" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this observed command, account, path and peer fit the approved administration or application workflow?" AS Hypothesis,
+  "Identify the process owner and approved task; read parent and network context; validate the script or binary when needed" AS SuggestedChecks,
+  "Current process snapshot only. Root shell is not proof of an interactive session; an interpreter argument may reference data rather than executed code" AS ObservationLimit,
+  "LTH - 04 / LTH - 03 / LTH - 05" AS RecommendedNotebook
+FROM AdminProcessSignals
+WHERE RemoteClient OR TransferTool OR FetchTool OR NetworkUtility OR RootShell OR PrivilegeUtility
+   OR InlineCode OR BackgroundSession OR ApplicationPathExe OR InterpreterPathReference
+
+LET ReviewAccountSignals <= SELECT *,
+  (UserUid!="0" AND UserUid!="" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$''') AS NonRootShellAccount,
+  (UserUid!="0" AND UserUid!="" AND HomeDir =~ '''^/(root|opt|srv)(/|$)''') AS ApplicationHomeAccount
+FROM UserFields
+LET ReviewAccountLeads <= SELECT ClientId,Fqdn,"Users and Privileges" AS Category,
+  "review_account_role" AS SignalId,"Account shell or application home requires role confirmation" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,UserName AS Evidence1,
+  dict(Uid=UserUid,Gid=UserGid) AS Evidence2,dict(Shell=UserShell,Home=HomeDir) AS Evidence3,
+  dict(NonRootShellAccount=NonRootShellAccount,ApplicationHomeAccount=ApplicationHomeAccount) AS Evidence4,
+  format(format="%v|review_account|%v|%v|%v|%v",args=[ClientId,UserName,UserUid,UserShell,HomeDir]) AS EvidenceKey,
+  "LTH.SystemBaseline/Users" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this account, shell and home required by a named person or application?" AS Hypothesis,
+  "Identify the account owner and intended role; request authentication or group evidence only if the hypothesis requires it" AS SuggestedChecks,
+  "Passwd snapshot: configured shell is not proof of login, and primary GID is not supplementary group membership" AS ObservationLimit,
+  "LTH - 02 / LTH - 03" AS RecommendedNotebook
+FROM ReviewAccountSignals WHERE NonRootShellAccount OR ApplicationHomeAccount
+
+LET ScheduledTaskLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_scheduled_command" AS SignalId,"Scheduled command for administrative-workflow review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=CronUser="root" OR CronEvent="@reboot" OR (Minute IN ("*","*/1") AND Hour="*"),then=2,else=1) AS ReviewPriority,
+  CronUser AS Evidence1,CronPath AS Evidence2,CronCommand AS Evidence3,
+  dict(Event=CronEvent,Minute=Minute,Hour=Hour,DayOfMonth=DayOfMonth,Month=Month,DayOfWeek=DayOfWeek,
+    RawLine=CronRawLine,ParserVersion=CronParserVersion,ParseStatus=CronParseStatus) AS Evidence4,
+  format(format="%v|review_cron|%v|%v|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,CronPath,CronUser,CronEvent,Minute,Hour,DayOfMonth,Month,DayOfWeek,CronCommand]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this scheduled command, execution account and frequency belong to an approved job?" AS Hypothesis,
+  "Identify the job owner; validate its script and destination; use execution logs if proof of a run is needed" AS SuggestedChecks,
+  "Shows every nonempty parsed command, including legitimate maintenance. Legacy cron parsing may have lost the real command or user" AS ObservationLimit,
+  "LTH - 06 / LTH - 04" AS RecommendedNotebook
+FROM CronResults
+
+LET ScheduledScriptLeads <= SELECT ClientId,Fqdn,"Persistence" AS Category,
+  "review_cron_script" AS SignalId,"Periodic cron script content for purpose and ownership review" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ScriptPath AS Evidence1,ScriptContent AS Evidence2,
+  ScriptMtime AS Evidence3,dict(FileSize=ScriptFileSize,ContentLimit=ScriptContentLimit,
+    PotentiallyTruncated=ScriptPotentiallyTruncated) AS Evidence4,
+  format(format="%v|review_cron_script|%v|%v",args=[ClientId,ScriptPath,ScriptContent]) AS EvidenceKey,
+  "LTH.SystemBaseline/Crontab" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this script expected in a periodic cron directory, and is it actually invoked by the configured scheduler?" AS Hypothesis,
+  "Review the collected content and owner; confirm run-parts eligibility and scheduler configuration if execution matters" AS SuggestedChecks,
+  "Only a collected content prefix; placement and Mtime do not prove execution or identify the modifier" AS ObservationLimit,
+  "LTH - 06" AS RecommendedNotebook
+FROM CronScriptFiles
+
+LET AccountScheduledLeads <= SELECT * FROM chain(accounts=ReviewAccountLeads,commands=ScheduledTaskLeads,scripts=ScheduledScriptLeads)
+
+LET ReviewNetworkFields <= SELECT *,
+  regex_replace(source=Laddr,re='''^\[|\]$''',replace="") AS ReviewLocalIP,
+  regex_replace(source=Raddr,re='''^\[|\]$''',replace="") AS ReviewPeerIP,
+  ConnStatus =~ '''(?i)^LISTEN(ING)?$''' AS ReviewListening,
+  ConnStatus =~ '''(?i)^(ESTABLISHED|ESTAB)$''' AS ReviewEstablished,
+  ProcName =~ '''(?i)^(ssh|scp|sftp|rsync|rclone|curl|wget|nc|ncat|socat|nmap|masscan|tcpdump|tshark)$''' AS ReviewAdministrativeTool
+FROM NetworkResults
+LET ReviewNetworkSignals <= SELECT *,
+  (ReviewListening AND cidr_contains(ip=ReviewLocalIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewLocalIP,ranges=["127.0.0.0/8","::1/128"])) AS NonLoopbackListener,
+  (ReviewEstablished AND ReviewAdministrativeTool
+    AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["127.0.0.0/8","::1/128","0.0.0.0/8","::/128"])) AS AdministrativeConnection,
+  (ReviewEstablished AND cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/0","::/0"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=["0.0.0.0/8","127.0.0.0/8","169.254.0.0/16","224.0.0.0/4","240.0.0.0/4","::/128","::1/128","fe80::/10","ff00::/8"])
+    AND NOT cidr_contains(ip=ReviewPeerIP,ranges=ReviewInternalCIDRs)) AS PeerOutsideConfiguredNetworks
+FROM ReviewNetworkFields
+LET NetworkReviewLeads <= SELECT ClientId,Fqdn,"Network" AS Category,
+  "review_socket_role" AS SignalId,"Listener or established peer for role and administration review" AS Indicator,
+  0 AS FindingWeight,
+  if(condition=AdministrativeConnection OR PeerOutsideConfiguredNetworks,then=2,else=1) AS ReviewPriority,
+  dict(Pid=Pid,Name=ProcName,Username=ProcUsername) AS Evidence1,ProcExe AS Evidence2,ProcCommandLine AS Evidence3,
+  dict(LocalAddress=Laddr,LocalPort=Lport,RemoteAddress=Raddr,RemotePort=Rport,Status=ConnStatus,CallChain=CallChain,
+    NonLoopbackListener=NonLoopbackListener,AdministrativeConnection=AdministrativeConnection,
+    PeerOutsideConfiguredNetworks=PeerOutsideConfiguredNetworks) AS Evidence4,
+  format(format="%v|review_socket|%v|%v|%v|%v|%v|%v|%v",
+    args=[ClientId,Pid,Laddr,Lport,Raddr,Rport,ConnStatus,ProcCommandLine]) AS EvidenceKey,
+  "LTH.SystemBaseline/NetworkConnections" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Does this process need this listening address or peer for its approved service or administrative task?" AS Hypothesis,
+  "Identify service and destination owners; confirm intended exposure and peer; correlate with the process and approved task" AS SuggestedChecks,
+  "Established sockets do not establish initiation direction. Wildcard listening does not prove Internet reachability; configured CIDRs are not a reputation check" AS ObservationLimit,
+  "LTH - 05 / LTH - 04" AS RecommendedNotebook
+FROM ReviewNetworkSignals
+WHERE NonLoopbackListener OR AdministrativeConnection OR PeerOutsideConfiguredNetworks
+
+LET ReviewServiceSignals <= SELECT *,
+  ServiceUnit =~ '''(?i)^(ssh|sshd|xrdp|xrdp-sesman|vncserver|tigervnc|telnet|rsh)([-.@][^ ]*)?\.service$''' AS RemoteAccessService,
+  ServiceUnit =~ '''(?i)^(docker|containerd|crio|cri-o|podman|kubelet)([-.@][^ ]*)?\.service$''' AS ContainerService,
+  ServiceUnit =~ '''(?i)^(nginx|apache2|httpd|mysql|mysqld|mariadb|postgresql|postgres|redis|redis-server|mongod|mongodb|elasticsearch)([-.@][^ ]*)?\.service$''' AS ApplicationDataService,
+  ServiceUnit =~ '''(?i)^(nfs|nfs-server|rpcbind|smb|smbd|nmb|nmbd|vsftpd|proftpd|pure-ftpd)([-.@][^ ]*)?\.service$''' AS FileSharingService
+FROM ServiceFields
+LET ActiveServiceLeads <= SELECT ClientId,Fqdn,"Services and Persistence" AS Category,
+  "review_active_service_role" AS SignalId,"Active access, application, container or file-sharing service" AS Indicator,
+  0 AS FindingWeight,1 AS ReviewPriority,ServiceUnit AS Evidence1,ServiceDescription AS Evidence2,
+  dict(Load=ServiceLoad,Active=ServiceActive,Sub=ServiceSub) AS Evidence3,
+  dict(RemoteAccessService=RemoteAccessService,ContainerService=ContainerService,
+    ApplicationDataService=ApplicationDataService,FileSharingService=FileSharingService) AS Evidence4,
+  format(format="%v|review_service|%v|%v|%v",args=[ClientId,ServiceUnit,ServiceActive,ServiceSub]) AS EvidenceKey,
+  "LTH.SystemBaseline/Services" AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this active service required for the host role and is its access or data exposure intended?" AS Hypothesis,
+  "Confirm the service owner and purpose; inspect related listeners; collect unit configuration only for the selected hypothesis" AS SuggestedChecks,
+  "Observed loaded service state and naming only; no ExecStart, enablement, installed-package ownership or exposure proof" AS ObservationLimit,
+  "LTH - 04 / LTH - 05 / LTH - 12" AS RecommendedNotebook
+FROM ReviewServiceSignals
+WHERE ServiceLoad="loaded" AND ServiceActive="active"
+  AND (RemoteAccessService OR ContainerService OR ApplicationDataService OR FileSharingService)
+
+LET ReviewPlatforms <= SELECT ClientId,
+  (TextOrEmpty(X=get(item=scope(),field="Platform")) || "Unknown") AS ReviewCohort
+FROM hunt_results(hunt_id=HuntId,artifact="LTH.SystemBaseline/Client_BasicInformation")
+GROUP BY ClientId
+LET ReviewPlatformIndex <= memoize(query={SELECT * FROM ReviewPlatforms},key="ClientId")
+
+-- Denominator is distinct clients that returned usable rows for this source,
+-- not all 16 scoped clients when some source results are missing.
+LET ReviewSourceClients <= SELECT * FROM chain(
+  processes={SELECT ClientId,"Process executable" AS Family FROM ProcessFields WHERE ProcExe!="" GROUP BY ClientId},
+  services={SELECT ClientId,"Service unit" AS Family FROM ServiceFields WHERE ServiceUnit!="" GROUP BY ClientId},
+  users={SELECT ClientId,"Shell account" AS Family FROM UserFields WHERE UserName!="" GROUP BY ClientId},
+  cron={SELECT ClientId,"Cron command" AS Family FROM CronResults GROUP BY ClientId}
+)
+LET ReviewSourceCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewSourceClients
+LET ReviewCoverage <= SELECT Family,ReviewCohort,count() AS CoveredHosts,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewSourceCohorts GROUP BY CohortKey
+LET ReviewCoverageIndex <= memoize(query={SELECT * FROM ReviewCoverage},key="CohortKey")
+
+LET ReviewObservations <= SELECT * FROM chain(
+  processes={SELECT ClientId,Fqdn,"Processes" AS Category,"Process executable" AS Family,
+    regex_replace(source=ProcExe,re='''\s+\(deleted\)$''',replace="") AS Entity,
+    "LTH.SystemBaseline/Processes" AS ObservationSource FROM ProcessFields WHERE ProcExe!=""},
+  services={SELECT ClientId,Fqdn,"Services and Persistence" AS Category,"Service unit" AS Family,
+    ServiceUnit AS Entity,"LTH.SystemBaseline/Services" AS ObservationSource FROM ServiceFields WHERE ServiceUnit!=""},
+  users={SELECT ClientId,Fqdn,"Users and Privileges" AS Category,"Shell account" AS Family,
+    UserName+"|"+UserShell AS Entity,"LTH.SystemBaseline/Users" AS ObservationSource
+    FROM UserFields WHERE UserUid!="0" AND UserShell =~ '''/(sh|bash|dash|zsh|ksh|fish|csh|tcsh)$'''},
+  cron={SELECT ClientId,Fqdn,"Persistence" AS Category,"Cron command" AS Family,
+    CronUser+"|"+CronCommand AS Entity,"LTH.SystemBaseline/Crontab" AS ObservationSource FROM CronResults}
+)
+LET ReviewObservedCohorts <= SELECT *,
+  (get(item=ReviewPlatformIndex,field=ClientId).ReviewCohort || "Unknown") AS ReviewCohort
+FROM ReviewObservations
+LET ReviewUniqueHostEntities <= SELECT *,
+  format(format="%v|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS HostEntityKey,
+  format(format="%v|%v|%v",args=[ReviewCohort,Family,Entity]) AS PrevalenceKey,
+  format(format="%v|%v",args=[ReviewCohort,Family]) AS CohortKey
+FROM ReviewObservedCohorts GROUP BY HostEntityKey
+LET ReviewPrevalence <= SELECT PrevalenceKey,count() AS HostsWithEntity
+FROM ReviewUniqueHostEntities GROUP BY PrevalenceKey
+LET ReviewPrevalenceIndex <= memoize(query={SELECT * FROM ReviewPrevalence},key="PrevalenceKey")
+LET ReviewPrevalenceRows <= SELECT *,
+  get(item=ReviewCoverageIndex,field=CohortKey).CoveredHosts AS CoveredHosts,
+  get(item=ReviewPrevalenceIndex,field=PrevalenceKey).HostsWithEntity AS HostsWithEntity
+FROM ReviewUniqueHostEntities
+LET RareBaselineLeads <= SELECT ClientId,Fqdn,Category,
+  "review_low_prevalence" AS SignalId,"Low-prevalence baseline entity in the observed platform cohort" AS Indicator,
+  0 AS FindingWeight,2 AS ReviewPriority,Family AS Evidence1,Entity AS Evidence2,
+  dict(PlatformCohort=ReviewCohort,HostsWithEntity=HostsWithEntity,CoveredHosts=CoveredHosts) AS Evidence3,
+  "Compare approved roles before treating rarity as an anomaly; do not interpret as newly created" AS Evidence4,
+  format(format="%v|review_prevalence|%v|%v|%v",args=[ClientId,ReviewCohort,Family,Entity]) AS EvidenceKey,
+  ObservationSource AS SourceArtifact,HuntId AS SourceHuntId,
+  "Is this uncommon executable, unit, account or scheduled command explained by this host's approved role?" AS Hypothesis,
+  "Compare with hosts having the same business role; identify owner and deployment purpose; inspect related baseline evidence" AS SuggestedChecks,
+  "One-Hunt prevalence among clients with source rows. Platform is not a business-role cohort; exact cron commands may contain host-specific values" AS ObservationLimit,
+  "LTH - 01 / the notebook for the observed family" AS RecommendedNotebook
+FROM ReviewPrevalenceRows
+WHERE ReviewCohort!="Unknown" AND CoveredHosts>=ReviewMinCohortHosts
+  AND HostsWithEntity<=ReviewMaxRareHosts
+  AND (HostsWithEntity * 100)<= (CoveredHosts * ReviewMaxRarePercent)
+
+LET AdditionalReviewCandidates <= SELECT * FROM chain(
+  admin=AdministrativeProcessLeads,account_cron=AccountScheduledLeads,
+  network=NetworkReviewLeads,services=ActiveServiceLeads,prevalence=RareBaselineLeads
+)
+LET EnhancedEvidenceCandidates <= SELECT * FROM chain(existing=AllEvidence,review=AdditionalReviewCandidates)
+LET EnhancedEvidence <= SELECT *,
+  if(condition=FindingWeight>0,then="Risk Indicator",else="Hunt Lead") AS EvidenceKind,
+  "Unreviewed" AS ReviewState,
+  if(condition=FindingWeight>=4,then=3,else=if(condition=FindingWeight>0,then=2,
+    else=(get(item=scope(),field="ReviewPriority") || 1))) AS ReviewPriority,
+  (get(item=scope(),field="SuggestedChecks") || Hypothesis) AS SuggestedChecks
+FROM EnhancedEvidenceCandidates GROUP BY EvidenceKey
+
+LET HuntLeadSummary <= SELECT ClientId,count() AS HuntLeadCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority
+FROM EnhancedEvidence GROUP BY ClientId
+LET HuntLeadIndex <= memoize(query={SELECT * FROM HuntLeadSummary},key="ClientId")
+LET FirstHuntLead(C) = SELECT Hypothesis FROM EnhancedEvidence WHERE ClientId=C ORDER BY ReviewPriority DESC LIMIT 1
+
+LET EvidenceAreas <= SELECT ClientId,Fqdn,Category,
+  max(item=FindingWeight) AS Weight,
+  sum(item=if(condition=FindingWeight>0,then=1,else=0)) AS EvidenceCount,
+  sum(item=if(condition=FindingWeight=0,then=1,else=0)) AS ReviewLeadCount,
+  max(item=ReviewPriority) AS HighestReviewPriority,
+  format(format="%v|%v",args=[ClientId,Category]) AS AreaKey
+FROM EnhancedEvidence GROUP BY AreaKey
+
+SELECT ClientId,Fqdn,Category AS HuntingArea,EvidenceKind,ReviewState,ReviewPriority,
+  if(condition=FindingWeight=5,then="Critical",else=if(condition=FindingWeight=4,then="High",
+    else=if(condition=FindingWeight=3,then="Medium",else=if(condition=FindingWeight>0,then="Low",else="Review")))) AS Severity,
+  Indicator,FindingWeight AS Weight,(FindingWeight>0) AS ContributesToRisk,
+  Evidence1,Evidence2,Evidence3,Evidence4,Hypothesis,SuggestedChecks,ObservationLimit,
+  EvidenceKey AS FindingKey,SignalId,SourceArtifact,SourceHuntId,RecommendedNotebook
+FROM EnhancedEvidence ORDER BY ReviewPriority DESC
+
+```
+
+## Cell 32 (markdown)
+
+# Investigation Pivot Guide
 
 Provides evidence-driven routing from Master Triage to specialized investigation notebooks.
 Select a route based on the actual indicator—not the Risk Score alone—define a constrained scope and testable hypothesis, validate the evidence in the primary notebook, and open secondary notebooks only when correlation is required.
+
+## Cell 33 (vql)
 
 ```vql
 LET PivotRoutes =
@@ -4434,36 +7923,3 @@ SELECT RouteOrder,
 FROM PivotRoutes
 ORDER BY RouteOrder
 ```
-
-## Scoring reference
-
-The Master Risk Score assigns the highest applicable weight once per triggered hunting area. Multiple underlying matches are retained in `FindingCount`, but they do not multiply the area contribution.
-
-| Weight | Severity |
-| ---: | --- |
-| 5 | Critical |
-| 4 | High |
-| 3 | Medium |
-| 2 | Low |
-| 0 | Coverage only; no score contribution |
-
-The client `RiskScore` is the sum of the triggered-area contributions.
-
-| Condition | RiskLevel |
-| --- | --- |
-| `RiskScore = 0` and fewer than 6 expected sources returned rows | Collection Review |
-| `RiskScore = 0` and all 6 expected sources returned rows | No Matched Finding |
-| At least one critical area, or `RiskScore >= 10` | High |
-| `RiskScore >= 6` | Suspicious |
-| `RiskScore >= 3` | Review |
-| Otherwise | Low |
-
-The six expected coverage sources are basic client information, users, processes, services, network connections, and Cron. An empty source requires validation; it is not proof that an endpoint is clean or that collection failed.
-
-## Interpretation rules
-
-- `RiskScore` ranks analyst attention; it does not provide a final verdict.
-- The sum of `ScoreContribution` in **Evidence Behind the Score** must equal the client's `RiskScore`.
-- **Triage Findings Detail** provides supporting raw evidence and is not added directly to `RiskScore`.
-- Select investigation routes from the actual indicator and evidence, not from the score alone.
-- Confirm findings through the relevant domain notebook, evidence correlation, and timeline analysis.

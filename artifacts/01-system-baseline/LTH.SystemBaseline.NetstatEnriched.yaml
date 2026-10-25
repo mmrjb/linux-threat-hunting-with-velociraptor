@@ -1,7 +1,9 @@
 name: LTH.SystemBaseline.NetstatEnriched
 author: Rajabzadeh
 description: |
-  Report network connections, and enrich with process information.
+  Report all TCP/UDP socket states, and enrich with process information.
+  Unresolved process metadata is retained when process filters use their default.
+  Empty enrichment is an observation limit, not proof that a socket has no owner.
 
 type: CLIENT
 
@@ -27,7 +29,7 @@ parameters:
     type: regex
   - name: ConnectionStatusRegex
     description: "regex search over connection status"
-    default: "LISTEN|ESTAB"
+    default: ".*"
     type: regex
   - name: ProcessPathRegex
     description: "regex search over source process path"
@@ -58,11 +60,11 @@ sources:
       WHERE Status =~ ConnectionStatusRegex
        AND  Raddr =~ IPRegex
        AND  ( Lport =~ PortRegex OR Rport =~ PortRegex )
-       AND ProcInfo.Name =~ ProcessNameRegex
-       AND ProcInfo.Username =~ UsernameRegex
-       AND ProcInfo.Exe =~ ProcessPathRegex
-       AND ProcInfo.CommandLine =~ CommandLineRegex
-       AND CallChain =~ CallChainRegex
+       AND (ProcessNameRegex = "." OR ProcInfo.Name =~ ProcessNameRegex)
+       AND (UsernameRegex = "." OR ProcInfo.Username =~ UsernameRegex)
+       AND (ProcessPathRegex = "." OR ProcInfo.Exe =~ ProcessPathRegex)
+       AND (CommandLineRegex = "." OR ProcInfo.CommandLine =~ CommandLineRegex)
+       AND (CallChainRegex = "." OR CallChain =~ CallChainRegex)
 
 column_types:
   - name: ChildrenTree
