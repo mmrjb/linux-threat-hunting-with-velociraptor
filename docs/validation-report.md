@@ -1,60 +1,93 @@
-# Validation Report
+# Validation report
 
-## Scope
+Date: 2026-10-25. Verified engine: Velociraptor 0.76.5, Linux amd64,
+commit a58cde830. The official binary is pinned by SHA-256 in CI.
 
-| Item | Value |
-| --- | --- |
-| Source archive | `linux-threat-hunting-with-velociraptor-20260729-152520.tar.gz` |
-| Source SHA-256 | `19b898b509f525fe76ca2e5e0a947c0d580b0fbff742c4ebd15203d59d5fbf95` |
-| Validation date | 2026-07-29 |
-| Exporting Velociraptor version | `0.76.5` |
-| Artifact definitions | 114 |
-
-## Results
+## Repository structure
 
 | Check | Result |
 | --- | ---: |
-| Safe archive paths | Pass |
-| YAML files parsed | 114 / 114 |
-| Unique artifact names | 114 / 114 |
-| Filename-to-name matches | 114 / 114 |
-| Duplicate source names | 0 |
-| Multi-source artifacts with unnamed sources | 0 |
-| Distinct internal `LTH.*` dependency targets resolved | 100 / 100 |
-| Total internal dependency references resolved | 156 / 156 |
-| Invalid named-source references | 0 |
-| Hard-coded Hunt IDs | 0 |
-| Hard-coded Client IDs | 0 |
-| Embedded private-key material | 0 |
-| Hard-coded IP addresses or email addresses | 0 |
+| Artifact definitions / unique names | 114 / 114 |
+| Internal dependency references / distinct resolved targets | 156 / 100 |
+| Baseline definitions / wrapper result sources | 10 / 10 |
+| Implicit artifact types | 28 |
+| Definitions using execve() / containing upload() | 39 / 8 |
+| Notebook source templates | 15 |
+| Ordered notebook cells | 508 |
+| VQL / Markdown cells | 242 / 266 |
+| Paused hunt creation templates | 14 |
+| Structural warnings / errors | 0 / 0 |
 
-Three strings matching private-key headers are intentional detection signatures inside `LTH.AuthSSH.PrivateKeys`; they are not key material.
+Structural validation covers YAML, artifact/source names and references,
+notebook JSON/Markdown consistency and order, public identifiers, dependency
+resolution, paused label-guarded hunt templates, conflicting precondition
+levels and accidentally nested update directories.
 
-## Schema observations
+All fifteen recovered notebook source JSON files and fourteen hunt templates
+were retained byte for byte while moving the update into the repository root.
+The two previously published root notebook documents were replaced by their
+complete recovered versions. The generated artifact catalog was refreshed.
+The prepared patch was also applied to a fresh checkout and its resulting
+Git tree matched the reviewed tree exactly.
 
-- 84 definitions explicitly declare `type: CLIENT`.
-- 30 exported definitions use the artifact type implicitly.
-- Three service artifacts use the supported legacy `queries` list rather than a singular `query` field.
+## Native VQL verification: passed
 
-These observations are warnings for maintainability, not YAML or dependency failures. The repository preserves the exported artifact code to avoid changing working collection logic without a live retest.
+Successful [GitHub Actions run](https://github.com/mmrjb/linux-threat-hunting-with-velociraptor/actions/runs/40223195727)
+for source commit `37c0a7fc5acd3607954ee20d481efa11b172fad1`.
 
-## Behavioral observations
+| Native verifier input | Passed |
+| --- | ---: |
+| Collector definitions | 114 |
+| Notebook VQL cells | 242 |
+| Hunt templates | 14 |
+| Extracted report queries | 11 |
+| Total artifact inputs | 381 |
 
-- 39 definitions contain `execve()` discovery commands.
-- 8 definitions contain conditional or source-specific `upload()` logic.
-- Sensitive-data collectors exist for SSH, command history, cloud CLI, configuration, process environment, and secret indicators.
+The verification helper wraps notebook/hunt/report VQL in temporary artifacts
+and uses the engine's static verifier. It does not execute operational hunts
+or collect endpoints. The workflow also checks the generated catalog against
+the committed version.
 
-Review [Security Policy](../SECURITY.md) and [Installation and Import](installation.md) before deployment.
+## Behavioral regressions: 5 passed
 
-## Limitations
+The same CI run executed all five tests with Velociraptor 0.76.5:
 
-This validation confirms archive safety, YAML structure, naming, internal references, and common publication-hygiene checks.
+- System/user cron parsing preserves all four fixture commands, including
+  regular and @reboot schedules, and retains the unparsed line and parser metadata.
+- Both cron collectors return no upload rows by default, including when called
+  directly for all sources; explicit source preconditions alone are insufficient
+  because VQL callers can bypass them. The acquisition query has its own opt-in gate.
+- Script content is bounded and truncation metadata is returned.
+- Local TCP/UDP fixture sockets remain visible without a configured process
+  tracker; an explicit nonmatching process filter excludes them.
+- Master Triage separates zero score, a critical UID-0 score of five and missing
+  collection data; repeated account evidence does not multiply its area score.
 
-It does not:
+These tests use temporary fixture files, local test sockets and synthetic
+hunt-result rows. They do not use production evidence or a deployed server.
 
-- execute every VQL source;
-- prove compatibility with Velociraptor versions other than the export environment;
-- measure endpoint performance;
-- validate every Linux distribution or package version;
-- determine whether every result is a true positive;
-- replace server-side `artifacts verify` and canary collection.
+## Reproduce
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/validate_repository.py
+python3 scripts/generate_artifact_catalog.py
+python3 scripts/validate_vql.py --binary /usr/local/bin/velociraptor
+python3 scripts/test_baseline.py --binary /usr/local/bin/velociraptor
+```
+
+The helper selects the supported verifier command and uses temporary local
+configuration. CI downloads the official pinned binary and checks its digest.
+
+## Operational limits
+
+No production endpoint or deployed Velociraptor service was changed. Complete
+an endpoint canary test before fleet deployment, including distro-specific
+package and service collection. Old hunts remain historical snapshots and
+need fresh collection to use corrected parser/network/service behavior.
+Row presence does not establish complete collection; scores do not establish
+compromise. Pattern-based disclosure checks do not replace content review.
+See [Baseline and Master Triage](baseline-and-triage.md).
+
+The previous source comparison is recorded in
+[Source review and October 2026 update](source-update-20261006.md).

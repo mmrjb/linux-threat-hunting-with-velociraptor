@@ -1,4 +1,4 @@
-name: Validate artifacts
+name: Validate LTH framework
 
 on:
   push:
@@ -34,3 +34,20 @@ jobs:
         run: |
           python scripts/generate_artifact_catalog.py
           git diff --exit-code -- docs/artifact-catalog.md
+
+      - name: Download pinned Velociraptor 0.76.5
+        id: velociraptor
+        run: |
+          curl --fail --location --retry 3 \
+            https://github.com/Velocidex/velociraptor/releases/download/v0.76/velociraptor-v0.76.5-linux-amd64 \
+            --output "$RUNNER_TEMP/velociraptor"
+          echo "e6b2b379c90aaddf549a200dea108fe34e397994d45d2fc3b68f53b2f5277b51  $RUNNER_TEMP/velociraptor" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/velociraptor"
+          "$RUNNER_TEMP/velociraptor" version
+
+      - name: Verify collectors, notebook cells, hunt templates and report VQL
+        run: python scripts/validate_vql.py --binary "$RUNNER_TEMP/velociraptor"
+
+      - name: Test baseline collectors and synthetic Master Triage
+        if: ${{ !cancelled() && steps.velociraptor.outcome == 'success' }}
+        run: python scripts/test_baseline.py --binary "$RUNNER_TEMP/velociraptor"

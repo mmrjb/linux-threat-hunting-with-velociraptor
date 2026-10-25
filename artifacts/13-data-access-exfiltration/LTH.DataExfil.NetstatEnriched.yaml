@@ -58,11 +58,11 @@ sources:
       WHERE Status =~ ConnectionStatusRegex
        AND  Raddr =~ IPRegex
        AND  ( Lport =~ PortRegex OR Rport =~ PortRegex )
-       AND ProcInfo.Name =~ ProcessNameRegex
-       AND ProcInfo.Username =~ UsernameRegex
-       AND ProcInfo.Exe =~ ProcessPathRegex
-       AND ProcInfo.CommandLine =~ CommandLineRegex
-       AND CallChain =~ CallChainRegex
+       AND (ProcessNameRegex = "." OR ProcInfo.Name =~ ProcessNameRegex)
+       AND (UsernameRegex = "." OR ProcInfo.Username =~ UsernameRegex)
+       AND (ProcessPathRegex = "." OR ProcInfo.Exe =~ ProcessPathRegex)
+       AND (CommandLineRegex = "." OR ProcInfo.CommandLine =~ CommandLineRegex)
+       AND (CallChainRegex = "." OR CallChain =~ CallChainRegex)
 
 column_types:
   - name: ChildrenTree

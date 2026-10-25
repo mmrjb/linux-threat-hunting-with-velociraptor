@@ -1,117 +1,49 @@
-# Uploading to GitHub from a Web Browser
+# Update the existing GitHub repository
 
-No Git installation is required.
+The October 25 maintenance update integrates the recovered notebook and hunt
+sources at the repository root. The duplicate update-package directory is
+removed, and baseline VQL corrections are included in the canonical files.
 
-Two upload batches are provided with the release because GitHub's browser uploader limits the number of files per upload. The batches preserve the final repository paths and remain below that limit.
+## Get the complete current source
 
-## 1. Create an empty repository
-
-Create a new GitHub repository:
-
-```text
-linux-threat-hunting-with-velociraptor
+```bash
+git clone https://github.com/mmrjb/linux-threat-hunting-with-velociraptor.git
+cd linux-threat-hunting-with-velociraptor
+python3 -m pip install -r requirements-dev.txt
+python3 scripts/validate_repository.py
 ```
 
-Recommended initial visibility:
+For an existing clean checkout on main:
 
-```text
-Private
+```bash
+git status --short
+git switch main
+git pull --ff-only
+python3 scripts/validate_repository.py
 ```
 
-Do not initialize it with a README, `.gitignore`, or license.
+Review and commit any local edits before updating. Do not copy an extracted
+parent package folder into the repository. Future updates should change the
+canonical artifact, notebook, hunt and documentation paths on a branch and
+use a pull request with the validation workflow.
 
-## 2. Upload batch 1
+## Verify the complete structure
 
-Extract:
+- artifacts/01-system-baseline/: ten definitions including the wrapper.
+- notebooks/: LTH-00 through LTH-14 and a catalog.
+- notebooks/sources/: fifteen ordered source JSON files.
+- hunts/templates/: fourteen paused, label-scoped creation templates.
+- No lth-github-update-20261006 directory.
 
-```text
-github-upload-batch-01.zip
+Native VQL and behavioral checks run in CI. They can also be run locally with
+a Velociraptor binary:
+
+```bash
+python3 scripts/validate_vql.py --binary /usr/local/bin/velociraptor
+python3 scripts/test_baseline.py --binary /usr/local/bin/velociraptor
 ```
 
-Open the extracted `github-upload-batch-01` folder, select all of its contents, and drag them into:
-
-```text
-Add file → Upload files
-```
-
-Use this commit message:
-
-```text
-Add framework, documentation, and artifact domains 01-07
-```
-
-Commit directly to `main`.
-
-## 3. Upload batch 2
-
-Extract:
-
-```text
-github-upload-batch-02.zip
-```
-
-Select all contents of the extracted `github-upload-batch-02` folder and upload them at the repository root. GitHub will merge the additional subdirectories into `artifacts/`.
-
-Use this commit message:
-
-```text
-Add artifact domains 08-14
-```
-
-Commit directly to `main`.
-
-## 4. Confirm repository structure
-
-At the repository root, confirm:
-
-```text
-README.md
-LICENSE
-NOTICE
-SECURITY.md
-CHANGELOG.md
-CONTRIBUTING.md
-artifacts/
-docs/
-notebooks/
-scripts/
-.github/
-```
-
-Inside `artifacts/`, confirm all directories `01-...` through `14-...` are present.
-
-## 5. Confirm automated validation
-
-Open the repository's **Actions** tab and confirm that **Validate artifacts** completes successfully.
-
-If the workflow does not appear, confirm that this file exists:
-
-```text
-.github/workflows/validate.yml
-```
-
-## 6. Review before making the repository public
-
-Search the repository for:
-
-```text
-H.
-C.
-password
-token
-private_key
-BEGIN
-```
-
-The documented detection strings in `LTH.AuthSSH.PrivateKeys` are expected. Investigate any other result.
-
-Also review:
-
-- author and profile details;
-- screenshots and image metadata;
-- organization or customer names;
-- internal IP addresses and hostnames;
-- raw results or exported evidence.
-
-When the review and Actions workflow are clean, change visibility from Private to Public.
-
+Review [the validation report](validation-report.md) for the completed checks
+and their limits. The GitHub update does not import artifacts into a running
+server or start a hunt. Use the canary steps in
+[Baseline and Master Triage](baseline-and-triage.md) after import.

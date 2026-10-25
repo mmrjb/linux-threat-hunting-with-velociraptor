@@ -10,13 +10,13 @@ It is generated from the YAML metadata. Run `python3 scripts/generate_artifact_c
 | --- | --- | ---: | --- |
 | [`LTH.SystemBaseline`](../artifacts/01-system-baseline/LTH.SystemBaseline.yaml) | `CLIENT` | 10 | Linux Threat Hunting - Section 2.1 System Baseline |
 | [`LTH.SystemBaseline.ClientInfo`](../artifacts/01-system-baseline/LTH.SystemBaseline.ClientInfo.yaml) | `CLIENT (implicit)` | 5 | Collect basic information about the client. |
-| [`LTH.SystemBaseline.Crontab`](../artifacts/01-system-baseline/LTH.SystemBaseline.Crontab.yaml) | `CLIENT (implicit)` | 3 | Displays parsed information from crontab. |
+| [`LTH.SystemBaseline.Crontab`](../artifacts/01-system-baseline/LTH.SystemBaseline.Crontab.yaml) | `CLIENT` | 3 | Parse system and per-user crontabs without losing the first command token. |
 | [`LTH.SystemBaseline.DebianPackages`](../artifacts/01-system-baseline/LTH.SystemBaseline.DebianPackages.yaml) | `CLIENT (implicit)` | 2 | List all packages installed on the system, both deb packages and "snaps". |
 | [`LTH.SystemBaseline.Mounts`](../artifacts/01-system-baseline/LTH.SystemBaseline.Mounts.yaml) | `CLIENT (implicit)` | 1 | List mounted filesystems by reading /proc/mounts |
-| [`LTH.SystemBaseline.NetstatEnriched`](../artifacts/01-system-baseline/LTH.SystemBaseline.NetstatEnriched.yaml) | `CLIENT` | 1 | Report network connections, and enrich with process information. |
+| [`LTH.SystemBaseline.NetstatEnriched`](../artifacts/01-system-baseline/LTH.SystemBaseline.NetstatEnriched.yaml) | `CLIENT` | 1 | Report all TCP/UDP socket states, and enrich with process information. |
 | [`LTH.SystemBaseline.Pslist`](../artifacts/01-system-baseline/LTH.SystemBaseline.Pslist.yaml) | `CLIENT (implicit)` | 1 | List processes and their running binaries. |
 | [`LTH.SystemBaseline.RHELPackages`](../artifacts/01-system-baseline/LTH.SystemBaseline.RHELPackages.yaml) | `CLIENT (implicit)` | 1 | Parse packages installed from dnf or yum |
-| [`LTH.SystemBaseline.Services`](../artifacts/01-system-baseline/LTH.SystemBaseline.Services.yaml) | `CLIENT (implicit)` | 1 | Parse services from systemctl |
+| [`LTH.SystemBaseline.Services`](../artifacts/01-system-baseline/LTH.SystemBaseline.Services.yaml) | `CLIENT (implicit)` | 1 | Parse loaded systemd service units, including inactive units, without pager, headings or truncation. |
 | [`LTH.SystemBaseline.Users`](../artifacts/01-system-baseline/LTH.SystemBaseline.Users.yaml) | `CLIENT (implicit)` | 1 | Get User specific information like homedir, group, etc. from `/etc/passwd`. |
 
 ## 02. Users, Groups & Privileges
@@ -50,7 +50,7 @@ It is generated from the YAML metadata. Run `python3 scripts/generate_artifact_c
 | [`LTH.ProcessServices`](../artifacts/04-process-services/LTH.ProcessServices.yaml) | `CLIENT` | 6 | Linux Threat Hunting - Section 2.4 Processes and Services |
 | [`LTH.ProcessServices.Pslist`](../artifacts/04-process-services/LTH.ProcessServices.Pslist.yaml) | `CLIENT (implicit)` | 1 | List processes and their running binaries. |
 | [`LTH.ProcessServices.ServiceUnitReview`](../artifacts/04-process-services/LTH.ProcessServices.ServiceUnitReview.yaml) | `CLIENT` | 2 | Linux Threat Hunting - Section 2.4 Processes and Services |
-| [`LTH.ProcessServices.Services`](../artifacts/04-process-services/LTH.ProcessServices.Services.yaml) | `CLIENT (implicit)` | 1 | Parse services from systemctl |
+| [`LTH.ProcessServices.Services`](../artifacts/04-process-services/LTH.ProcessServices.Services.yaml) | `CLIENT (implicit)` | 1 | Parse loaded systemd service units, including inactive units, without pager, headings or truncation. |
 | [`LTH.ProcessServices.SuspiciousProcesses`](../artifacts/04-process-services/LTH.ProcessServices.SuspiciousProcesses.yaml) | `CLIENT` | 1 | Linux Threat Hunting - Section 2.4 Processes and Services |
 | [`LTH.ProcessServices.SuspiciousServices`](../artifacts/04-process-services/LTH.ProcessServices.SuspiciousServices.yaml) | `CLIENT` | 1 | Linux Threat Hunting - Section 2.4 Processes and Services |
 
@@ -71,9 +71,9 @@ It is generated from the YAML metadata. Run `python3 scripts/generate_artifact_c
 | --- | --- | ---: | --- |
 | [`LTH.Persistence`](../artifacts/06-persistence/LTH.Persistence.yaml) | `CLIENT` | 13 | Linux Threat Hunting - Section 2.6 Persistence Mechanisms |
 | [`LTH.Persistence.AuthorizedKeys`](../artifacts/06-persistence/LTH.Persistence.AuthorizedKeys.yaml) | `CLIENT (implicit)` | 1 | Finds and parses SSH authorized keys files. |
-| [`LTH.Persistence.Crontab`](../artifacts/06-persistence/LTH.Persistence.Crontab.yaml) | `CLIENT (implicit)` | 3 | Displays parsed information from crontab. |
+| [`LTH.Persistence.Crontab`](../artifacts/06-persistence/LTH.Persistence.Crontab.yaml) | `CLIENT` | 3 | Parse system and per-user crontabs without losing the first command token. |
 | [`LTH.Persistence.PAMReview`](../artifacts/06-persistence/LTH.Persistence.PAMReview.yaml) | `CLIENT` | 2 | Linux Threat Hunting - Section 2.6 Persistence Mechanisms |
-| [`LTH.Persistence.Services`](../artifacts/06-persistence/LTH.Persistence.Services.yaml) | `CLIENT (implicit)` | 1 | Parse services from systemctl |
+| [`LTH.Persistence.Services`](../artifacts/06-persistence/LTH.Persistence.Services.yaml) | `CLIENT (implicit)` | 1 | Parse loaded systemd service units, including inactive units, without pager, headings or truncation. |
 | [`LTH.Persistence.ShellProfileReview`](../artifacts/06-persistence/LTH.Persistence.ShellProfileReview.yaml) | `CLIENT` | 2 | Linux Threat Hunting - Section 2.6 Persistence Mechanisms |
 | [`LTH.Persistence.StartupFilesReview`](../artifacts/06-persistence/LTH.Persistence.StartupFilesReview.yaml) | `CLIENT` | 2 | Linux Threat Hunting - Section 2.6 Persistence Mechanisms |
 | [`LTH.Persistence.SystemdTimerReview`](../artifacts/06-persistence/LTH.Persistence.SystemdTimerReview.yaml) | `CLIENT` | 2 | Linux Threat Hunting - Section 2.6 Persistence Mechanisms |
