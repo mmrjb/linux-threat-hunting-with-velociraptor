@@ -26,10 +26,9 @@ parameters:
     default: "N"
     type: bool
 
-precondition: SELECT OS FROM info() WHERE OS = 'linux'
-
 sources:
   - name: CronTabs
+    precondition: SELECT OS FROM info() WHERE OS = 'linux'
     query: |
       LET ScheduleRegex = '''(?P<Minute>\S+)\s+(?P<Hour>\S+)\s+(?P<DayOfMonth>\S+)\s+(?P<Month>\S+)\s+(?P<DayOfWeek>\S+)\s+'''
       LET raw = SELECT * FROM foreach(
@@ -71,6 +70,7 @@ sources:
       FROM raw
 
   - name: CronScripts
+    precondition: SELECT OS FROM info() WHERE OS = 'linux'
     query: |
       SELECT Mtime, OSPath, OSPath AS Path, Size,
              read_file(filename=OSPath, length=Length) AS Content,
@@ -82,7 +82,7 @@ sources:
       GROUP BY OSPath
 
   - name: Uploaded
-    precondition: SELECT * FROM scope() WHERE UploadFiles
+    precondition: SELECT OS FROM info() WHERE OS = 'linux' AND UploadFiles
     query: |
       SELECT OSPath, upload(file=OSPath) AS Upload
       FROM glob(globs=split(string=cronTabGlob + "," + cronTabScripts, sep=","))

@@ -36,6 +36,7 @@ jobs:
           git diff --exit-code -- docs/artifact-catalog.md
 
       - name: Download pinned Velociraptor 0.76.5
+        id: velociraptor
         run: |
           curl --fail --location --retry 3 \
             https://github.com/Velocidex/velociraptor/releases/download/v0.76/velociraptor-v0.76.5-linux-amd64 \
@@ -48,4 +49,5 @@ jobs:
         run: python scripts/validate_vql.py --binary "$RUNNER_TEMP/velociraptor"
 
       - name: Test baseline collectors and synthetic Master Triage
+        if: ${{ !cancelled() && steps.velociraptor.outcome == 'success' }}
         run: python scripts/test_baseline.py --binary "$RUNNER_TEMP/velociraptor"

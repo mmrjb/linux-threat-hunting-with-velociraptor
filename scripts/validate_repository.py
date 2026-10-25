@@ -185,6 +185,12 @@ def main() -> int:
             errors.append(f"{relative}: top level must be a YAML mapping")
             continue
 
+        if data.get("precondition") and any(
+            isinstance(source, dict) and source.get("precondition")
+            for source in data.get("sources", [])
+        ):
+            errors.append(f"{relative}: top-level and source preconditions cannot be combined")
+
         name = data.get("name")
         if not isinstance(name, str) or not name.strip():
             errors.append(f"{relative}: missing artifact name")
