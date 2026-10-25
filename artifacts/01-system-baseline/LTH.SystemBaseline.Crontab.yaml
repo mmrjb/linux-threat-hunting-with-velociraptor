@@ -82,9 +82,12 @@ sources:
       GROUP BY OSPath
 
   - name: Uploaded
-    precondition: SELECT OS FROM info() WHERE OS = 'linux' AND UploadFiles
+    precondition: SELECT OS FROM info() WHERE OS = 'linux' AND UploadFiles = TRUE
     query: |
-      SELECT OSPath, upload(file=OSPath) AS Upload
-      FROM glob(globs=split(string=cronTabGlob + "," + cronTabScripts, sep=","))
-      WHERE NOT IsDir
-      GROUP BY OSPath
+      -- A caller may bypass artifact preconditions. Gate the query itself too.
+      SELECT * FROM if(condition=UploadFiles = TRUE, then={
+        SELECT OSPath, upload(file=OSPath) AS Upload
+        FROM glob(globs=split(string=cronTabGlob + "," + cronTabScripts, sep=","))
+        WHERE NOT IsDir
+        GROUP BY OSPath
+      })
